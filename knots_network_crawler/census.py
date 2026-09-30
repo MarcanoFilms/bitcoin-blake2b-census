@@ -1,9 +1,9 @@
 """
-Build a BLAKE2b-fork node census (data.json) from a crawler database.
+Build a Bitcoin-Blake2b node census (data.json) from a crawler database.
 
-Only chain-verified fork nodes (is_fork = 1) are counted, so the figures are
+Only chain-verified BLAKE2b nodes (is_fork = 1) are counted, so the figures are
 about the BLAKE2b network specifically, not the shared Bitcoin P2P network the
-fork rides on. Reachable = advertises NODE_NETWORK and completed our crawl.
+BLAKE2b chain rides on. Reachable = advertises NODE_NETWORK and completed our crawl.
 
 Optionally merges a passive-sensor list (inbound peers observed by our own
 node via `bitcoin-cli getpeerinfo`) to estimate the non-listening population,

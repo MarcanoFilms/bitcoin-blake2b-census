@@ -66,23 +66,23 @@ class CrawlerConfig:
         "8.8.8.8:8333",   # placeholder, real list populated at runtime from DNS
     ])
 
-    # BLAKE2b fork detection (V2, chain-verified).
-    # We ask each peer for headers with a post-fork block as locator; only a node
-    # on the fork chain has it and returns the next header building on it. The
-    # locator is block height fork_anchor_height, and a fork node's reply has a
+    # BLAKE2b chain detection (V2, chain-verified).
+    # We ask each peer for headers with a post-activation block as locator; only a node
+    # on the BLAKE2b chain has it and returns the next header building on it. The
+    # locator is block height fork_anchor_height, and a BLAKE2b node's reply has a
     # first header whose prev_block == fork_anchor_hash (display/big-endian hex).
     # The anchor is the BLAKE2b ACTIVATION block itself (the one whose coinbase
-    # carries the canonical headline). It is the block that *defines* the fork:
+    # carries the canonical headline). It is the block that *defines* the chain:
     # it can never reorg out and the anchor never needs updating. fork_anchor_hash
     # is the locator; fork_stop_hash is its child, used as getheaders hash_stop so
-    # a fork peer replies with a SINGLE header (whose prev_block == the locator)
-    # instead of a 2000-header/160 KB dump. A mainnet node lacks this fork-only
+    # a BLAKE2b peer replies with a SINGLE header (whose prev_block == the locator)
+    # instead of a 2000-header/160 KB dump. A mainnet node lacks this chain-only
     # block and falls back to genesis.
     fork_detect: bool = True
     fork_anchor_height: int = 961640
     fork_anchor_hash: str = "0000000000000050c1e5f69672f459293be14f46e5a494e7a8c8541396f18eeb"
     fork_stop_hash: str = "0000000000000010ef13157db08c138ea82aa1ac0ec360bdb9f101ce3ed7f7b6"
-    # Genesis-style headline in the activation block's coinbase — the fork's
+    # Genesis-style headline in the activation block's coinbase — the chain's
     # consensus signature. Shown on the census page; implicitly enforced by every
     # node the anchor check confirms (they all accepted this exact block).
     fork_headline: str = "8-30 NYPost Deride And Conquer"

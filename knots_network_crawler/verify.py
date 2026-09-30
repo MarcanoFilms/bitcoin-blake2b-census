@@ -1,14 +1,14 @@
 """
-Phase 2 — focused BLAKE2b fork verification.
+Phase 2 — focused BLAKE2b chain verification.
 
 The discovery crawl (phase 1) finds nodes and their version/height/services but
-skips the fork check, because its getaddr traffic (large addr dumps) saturates a
+skips the chain check, because its getaddr traffic (large addr dumps) saturates a
 limited uplink and starves the tiny getheaders replies. Here we revisit only the
 candidates (reachable Knots nodes) with dedicated connections that do *just* the
 version handshake + a single getheaders anchor probe — no getaddr — so the
 81-byte header reply is never contended and detection is reliable.
 
-A node is on the fork iff, asked for headers with the activation block as
+A node is on the chain iff, asked for headers with the activation block as
 locator, it replies with a header whose prev_block equals that locator.
 """
 from __future__ import annotations
@@ -34,7 +34,7 @@ from .protocol import (
 
 async def probe_fork(ip: str, port: int, locator: bytes, stop: bytes,
                      connect_timeout: float = 10.0, read_timeout: float = 12.0) -> bool:
-    """Return True iff the peer is on the BLAKE2b fork chain."""
+    """Return True iff the peer is on the BLAKE2b chain."""
     try:
         reader, writer = await asyncio.wait_for(
             asyncio.open_connection(ip, port), timeout=connect_timeout)
@@ -83,7 +83,7 @@ async def probe_fork(ip: str, port: int, locator: bytes, stop: bytes,
 async def verify_candidates(db: Database, cfg: CrawlerConfig,
                             candidates: List[Tuple[str, int]],
                             concurrency: int = 12, progress=None) -> dict:
-    """Probe each candidate for fork membership and persist is_fork. Returns counts."""
+    """Probe each candidate for membership and persist is_fork. Returns counts."""
     locator = hash_display_to_internal(cfg.fork_anchor_hash)
     stop = hash_display_to_internal(cfg.fork_stop_hash) if cfg.fork_stop_hash else b"\x00" * 32
     sem = asyncio.Semaphore(concurrency)

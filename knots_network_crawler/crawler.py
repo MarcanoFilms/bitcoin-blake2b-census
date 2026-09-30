@@ -87,15 +87,15 @@ class KnotsNetworkCrawler:
         self.best_height: int = 0
         self._session_id: Optional[int] = None
 
-        # BLAKE2b fork detection: locator = the post-fork anchor block, in wire
-        # (internal, little-endian) order. A fork node returns a first header
+        # BLAKE2b chain detection: locator = the post-activation anchor block, in wire
+        # (internal, little-endian) order. A BLAKE2b node returns a first header
         # whose prev_block == this; a mainnet node falls back to genesis.
         self._fork_locator: Optional[bytes] = (
             hash_display_to_internal(config.fork_anchor_hash)
             if getattr(config, "fork_detect", False) and getattr(config, "fork_anchor_hash", "")
             else None
         )
-        # hash_stop = block H+1, so a fork peer returns exactly one header.
+        # hash_stop = block H+1, so a BLAKE2b peer returns exactly one header.
         self._fork_stop: bytes = (
             hash_display_to_internal(getattr(config, "fork_stop_hash", "") or "")
             if getattr(config, "fork_stop_hash", "") else b"\x00" * 32
@@ -383,8 +383,8 @@ class KnotsNetworkCrawler:
             if not version_received:
                 return
 
-            # 2b. Chain-verify BLAKE2b fork membership: ask for headers using the
-            # post-fork anchor as locator. Only a node on the fork chain has that
+            # 2b. Chain-verify BLAKE2b membership: ask for headers using the
+            # post-activation anchor as locator. Only a node on the BLAKE2b chain has that
             # block and replies with a header building on it (prev_block == anchor).
             if self._fork_locator is not None:
                 writer.write(build_getheaders([self._fork_locator], hash_stop=self._fork_stop))
@@ -393,7 +393,7 @@ class KnotsNetworkCrawler:
                 # feefilter/ping, sometimes a large addr) before the headers
                 # reply, so give the exchange a generous window and keep reading
                 # past unrelated messages until the headers arrive.
-                # With hash_stop set, a fork peer's reply is a single ~81-byte
+                # With hash_stop set, a BLAKE2b peer's reply is a single ~81-byte
                 # header that arrives right after its sendcmpct/ping/getheaders/
                 # feefilter burst, so a short window keeps the crawl fast while
                 # staying reliable.
@@ -487,7 +487,7 @@ class KnotsNetworkCrawler:
         ua = (node.subversion or "").lower()
         node.is_knots = "knots" in ua or ".knots" in ua
 
-        # Chain-verified BLAKE2b fork membership (independent of user agent)
+        # Chain-verified BLAKE2b membership (independent of user agent)
         node.is_fork = fork_verified
 
         # GeoIP

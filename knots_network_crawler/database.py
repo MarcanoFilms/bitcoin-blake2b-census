@@ -280,7 +280,7 @@ class Database:
             return [self._row_to_node(r) for r in rows]
 
     async def get_fork_candidates(self, limit: int = 20000) -> List[tuple]:
-        """Reachable nodes that could be on the fork (Knots user agent, at or
+        """Reachable nodes that could be on the chain (Knots user agent, at or
         past the activation height). Returns (ip, port) for a focused verify pass."""
         if not self._conn:
             await self.connect()

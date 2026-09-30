@@ -67,7 +67,7 @@ def cmd_crawl(
     geoip_asn: Optional[Path] = typer.Option(None, "--geo-asn", help="Path to GeoLite2-ASN.mmdb"),
     only_known: bool = typer.Option(False, "--only-known", help="Do not discover new nodes, only refresh existing"),
     seeds: Optional[List[str]] = typer.Option(None, "--seed", help="Additional bootstrap seeds (ip:port or hostname)"),
-    no_fork_detect: bool = typer.Option(False, "--no-fork-detect", help="Skip per-peer BLAKE2b fork check (fast discovery phase; verify separately)"),
+    no_fork_detect: bool = typer.Option(False, "--no-fork-detect", help="Skip per-peer BLAKE2b chain check (fast discovery phase; verify separately)"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompts"),
 ) -> None:
     """Run a crawl against the Bitcoin mainnet P2P network."""
@@ -241,10 +241,10 @@ def cmd_export(
 @app.command("verify")
 def cmd_verify(
     db: Optional[Path] = typer.Option(None, "--db"),
-    concurrency: int = typer.Option(12, "--concurrency", "-c", help="Parallel fork probes"),
+    concurrency: int = typer.Option(12, "--concurrency", "-c", help="Parallel membership probes"),
     limit: int = typer.Option(20000, "--limit", help="Max candidates to verify"),
 ) -> None:
-    """Phase 2: verify BLAKE2b fork membership for reachable Knots candidates
+    """Phase 2: verify BLAKE2b membership for reachable Knots candidates
     (version + single getheaders probe only, no getaddr)."""
     cfg = load_config(db_path=str(db) if db else None)
     d = _get_db(cfg.db_path)
@@ -255,7 +255,7 @@ def cmd_verify(
         candidates = await d.get_fork_candidates(limit)
         console.print(f"[yellow]Verifying[/yellow] {len(candidates)} candidates at concurrency {concurrency}…")
         counts = await verify_candidates(d, cfg, candidates, concurrency=concurrency)
-        console.print(f"[green]Done:[/green] {counts['fork']} fork / {counts['checked']} checked")
+        console.print(f"[green]Done:[/green] {counts['fork']} BLAKE2b / {counts['checked']} checked")
 
     asyncio.run(_run())
 
