@@ -211,6 +211,9 @@ function render(d){
     <div class="card stat"><div class="label">Height</div>
       <div class="val" style="font-size:1.7rem">${fmt(d.fork_tip)}</div>
       <div class="hint">${fmt(d.heights.tip)} at tip · ${fmt(d.heights.behind)} behind${d.heights.unknown?' · '+fmt(d.heights.unknown)+' unknown':''}</div></div>
+    <div class="card stat"><div class="label">All-time nodes</div>
+      <div class="val" id="rec-total" style="color:var(--green)">—</div>
+      <div class="hint" id="rec-hint">unique ever recorded</div></div>
   </div>
 
   <div class="grid" style="margin-top:16px">
@@ -294,6 +297,27 @@ function loadTrend(){
     .then(r=>r.ok?r.json():[]).then(drawTrend).catch(()=>{});
 }
 
+// All-time node record from registry.csv (the growing count of every unique node
+// ever confirmed — shows how big the network really is over time).
+function loadRegistry(){
+  const totEl=document.getElementById('rec-total'), hintEl=document.getElementById('rec-hint');
+  if(!totEl) return;
+  fetch(location.protocol==='file:' ? 'registry.csv' : 'registry.csv?t='+Date.now())
+    .then(r=>r.ok?r.text():'').then(txt=>{
+      const lines=txt.trim().split('\n'); if(lines.length<2){totEl.textContent='—';return;}
+      const head=lines[0].split(','); const iLast=head.indexOf('last_seen'), iFirst=head.indexOf('first_seen');
+      const now=Date.now(); let total=0, active=0, oldest=Infinity;
+      for(let i=1;i<lines.length;i++){
+        const c=lines[i].split(','); if(c.length<head.length) continue; total++;
+        const ls=Date.parse(c[iLast]); if(!isNaN(ls) && (now-ls)<=30*86400000) active++;
+        const fs=Date.parse(c[iFirst]); if(!isNaN(fs)) oldest=Math.min(oldest,fs);
+      }
+      totEl.textContent=fmt(total);
+      const since=isFinite(oldest)?new Date(oldest).toLocaleDateString('en-US',{month:'short',year:'numeric'}):'';
+      hintEl.textContent=`${fmt(active)} active (30d) · since ${since}`;
+    }).catch(()=>{totEl.textContent='—';});
+}
+
 // ---- Node map: real continents (Natural Earth) + dots, same equirectangular
 // projection for both so dots land exactly on the coastlines. ----
 var _worldGeo = null;
@@ -374,7 +398,7 @@ function renderExplorer(){
 function load(){
   fetch(location.protocol==='file:' ? 'data.json' : 'data.json?t='+Date.now())
     .then(r=>{if(!r.ok)throw new Error('data.json '+r.status);return r.json()})
-    .then(d=>{render(d); loadTrend();})
+    .then(d=>{render(d); loadTrend(); loadRegistry();})
     .catch(e=>{document.getElementById('app').innerHTML='<div class="card err">Couldn\'t load data.json: '+e.message+'</div>'});
 }
 load();
