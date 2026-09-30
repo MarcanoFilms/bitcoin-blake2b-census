@@ -33,14 +33,17 @@ ADDRMAN=$($CLI getnodeaddresses 800 2>/dev/null \
 SEEDS="$SEEDS $ADDRMAN"
 
 # --- Phase 1: discovery crawl (no per-peer fork check → fast, broad) ---
+# Hard wall-clock cap with `timeout`: the crawl's internal --duration doesn't
+# always wind down cleanly under a slow uplink, so we bound it externally
+# (SIGTERM at the cap, SIGKILL 20s later) to guarantee the run fits its budget.
 # shellcheck disable=SC2086
-"$PY" -m knots_network_crawler crawl \
+timeout -k 20 "$((DURATION + 90))" "$PY" -m knots_network_crawler crawl \
   --mode normal --concurrency "$CONCURRENCY" --duration "$DURATION" \
   --max-nodes 20000 --no-fork-detect --yes --db "$DB" $SEEDS >/dev/null 2>&1 || true
 
-# --- Phase 2: verify fork membership for reachable Knots candidates ---
+# --- Phase 2: verify BLAKE2b membership for reachable Knots candidates ---
 # Dedicated version+getheaders probes, no getaddr contention → reliable.
-"$PY" -m knots_network_crawler verify \
+timeout -k 20 "${CENSUS_VERIFY_TIMEOUT:-600}" "$PY" -m knots_network_crawler verify \
   --db "$DB" --concurrency "${CENSUS_VERIFY_CONCURRENCY:-12}" >/dev/null 2>&1 || true
 
 # --- fork tip + passive sensor (inbound peers = non-listening candidates) ---
