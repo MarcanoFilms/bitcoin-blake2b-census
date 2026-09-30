@@ -57,12 +57,16 @@ async def probe_node(ip: str, port: int, anchor: bytes, anchor_stop: bytes,
                      tip_height: Optional[int], tip_header: Optional[bytes], tip_stop: bytes,
                      height_locators: List[Tuple[bytes, int]], header_size: int = 80,
                      connect_timeout: float = 10.0, read_timeout: float = 12.0
-                     ) -> Tuple[bool, Optional[int]]:
-    """Return (is_member, verified_height). verified_height is None if unknown."""
+                     ) -> Tuple[str, Optional[int]]:
+    """Return (status, verified_height). status is one of:
+      'member'      — confirmed on the BLAKE2b chain (never downgrade on this),
+      'not_member'  — got a definitive reply that is NOT our chain,
+      'unreachable' — couldn't determine (connect/handshake/timeout) — leave as-is.
+    Only a definitive answer changes is_fork; a timeout must not drop a good node."""
     try:
         reader, writer = await asyncio.wait_for(asyncio.open_connection(ip, port), timeout=connect_timeout)
     except Exception:
-        return False, None
+        return "unreachable", None
     try:
         writer.write(make_version_message(addr_recv_ip=ip, addr_recv_port=port, start_height=0))
         await writer.drain()
@@ -72,23 +76,25 @@ async def probe_node(ip: str, port: int, anchor: bytes, anchor_stop: bytes,
             try:
                 cmd, _ = await asyncio.wait_for(read_message(reader, timeout=read_timeout), timeout=read_timeout)
             except (asyncio.TimeoutError, BitcoinProtocolError):
-                return False, None
+                return "unreachable", None
             if cmd == CMD_VERSION:
                 got_version = True
                 writer.write(build_verack()); await writer.drain()
             elif cmd == CMD_VERACK:
                 got_verack = True
         if not got_version:
-            return False, None
+            return "unreachable", None
 
         # 1. membership
         writer.write(build_getheaders([anchor], hash_stop=anchor_stop)); await writer.drain()
         try:
             payload = await _read_until_headers(reader, read_timeout, 20.0)
         except (asyncio.TimeoutError, BitcoinProtocolError):
-            return False, None
-        if payload is None or parse_headers_first_prevblock(payload) != anchor:
-            return False, None
+            return "unreachable", None
+        if payload is None:
+            return "unreachable", None
+        if parse_headers_first_prevblock(payload) != anchor:
+            return "not_member", None
 
         # 2. chain-verified height (best-effort; membership already confirmed)
         verified_height: Optional[int] = None
@@ -109,9 +115,12 @@ async def probe_node(ip: str, port: int, anchor: bytes, anchor_stop: bytes,
                         verified_height = min(tip_height, loc_height + count)
                         if tip_header is not None and last_header == tip_header:
                             verified_height = tip_height
-        return True, verified_height
+        return "member", verified_height
     except Exception:
-        return True, None  # membership may have passed before a late error
+        # Membership was already confirmed above (we'd have returned otherwise),
+        # so this is a late error during the height probe — keep the membership,
+        # drop the height.
+        return "member", None
     finally:
         try:
             writer.close(); await writer.wait_closed()
@@ -135,19 +144,23 @@ async def verify_candidates(db: Database, cfg: CrawlerConfig,
     loc = [(hash_display_to_internal(h), ht) for h, ht in (locators or [])]
 
     sem = asyncio.Semaphore(concurrency)
-    counts = {"checked": 0, "fork": 0, "heights": 0}
+    counts = {"checked": 0, "fork": 0, "heights": 0, "unreachable": 0}
 
     async def one(ip: str, port: int):
         async with sem:
-            is_member, vheight = await probe_node(
+            status, vheight = await probe_node(
                 ip, port, anchor, anchor_stop, tip_height, tip_header_b, tip_stop_b, loc,
                 header_size=getattr(cfg, "fork_header_size", 80))
-            await db.set_fork(ip, port, is_member, vheight)
             counts["checked"] += 1
-            if is_member:
+            if status == "member":
+                await db.set_fork(ip, port, True, vheight)
                 counts["fork"] += 1
-            if vheight is not None:
-                counts["heights"] += 1
+                if vheight is not None:
+                    counts["heights"] += 1
+            elif status == "not_member":
+                await db.set_fork(ip, port, False)
+            else:  # unreachable this pass — do NOT downgrade a previously verified node
+                counts["unreachable"] += 1
             if progress and counts["checked"] % 25 == 0:
                 progress("verify", dict(counts))
 

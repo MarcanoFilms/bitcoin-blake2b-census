@@ -12,8 +12,10 @@ the way Luke Dashjr's counts include nodes a pure crawler can never reach.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from collections import Counter
+from datetime import datetime, timezone
 from typing import Optional
 
 # Service bits (mirrors protocol.py; duplicated so the exporter can run stand-alone)
@@ -33,7 +35,7 @@ def build_census(db_path: str, generated_ts: int, fork_tip: Optional[int] = None
                  sensor_peers: Optional[list] = None,
                  fork_headline: str = "8-30 NYPost Deride And Conquer",
                  anchor_height: int = 961640,
-                 interval_seconds: int = 7200) -> dict:
+                 interval_seconds: int = 7200, fresh_hours: int = 24) -> dict:
     """Read the crawler DB and return a census dict ready to serialize."""
     con = sqlite3.connect(db_path)
     con.row_factory = sqlite3.Row
@@ -42,7 +44,23 @@ def build_census(db_path: str, generated_ts: int, fork_tip: Optional[int] = None
     ).fetchall()
     con.close()
 
-    reachable = [r for r in rows if r["services_listening"]]
+    # Freshness window: since a timeout no longer downgrades is_fork (a good node
+    # must not vanish just because one pass couldn't reach it), age nodes out by
+    # last_seen instead — count only those seen within `fresh_hours`. Fail-open:
+    # keep a node if its timestamp can't be parsed, so we never drop everything.
+    def is_fresh(r) -> bool:
+        ls = r["last_seen"] if "last_seen" in r.keys() else None
+        if not ls:
+            return True
+        try:
+            t = datetime.fromisoformat(ls)
+            if t.tzinfo is None:
+                t = t.replace(tzinfo=timezone.utc)
+            return (generated_ts - t.timestamp()) <= fresh_hours * 3600
+        except Exception:
+            return True
+
+    reachable = [r for r in rows if r["services_listening"] and is_fresh(r)]
 
     # Prefer the chain-verified height (measured against one reference tip in the
     # verify phase) over the node's self-declared start_height, which drifts with
@@ -126,7 +144,7 @@ def build_census(db_path: str, generated_ts: int, fork_tip: Optional[int] = None
         "fork_headline": fork_headline,
         "anchor_height": anchor_height,
         "fork_tip": tip,
-        "fork_total": len(rows),
+        "fork_total": sum(1 for r in rows if is_fresh(r)),
         "fork_reachable": len(reachable),
         "non_listening_seen": non_listening,
         "total_estimate": len(reachable) + non_listening,
@@ -140,12 +158,41 @@ def build_census(db_path: str, generated_ts: int, fork_tip: Optional[int] = None
     }
 
 
+def append_history(out_path: str, data: dict, max_points: int = 2160) -> None:
+    """Append a compact aggregate snapshot to history.json next to out_path, for a
+    time-series (reachable/estimate/countries/tip over time). Keeps ~90 days
+    hourly (max_points). Best-effort: never let history break the census write."""
+    hist_path = os.path.join(os.path.dirname(out_path) or ".", "history.json")
+    try:
+        try:
+            with open(hist_path) as f:
+                hist = json.load(f)
+                if not isinstance(hist, list):
+                    hist = []
+        except Exception:
+            hist = []
+        hist.append({
+            "t": data["generated"],
+            "reachable": data["fork_reachable"],
+            "estimate": data["total_estimate"],
+            "countries": data["countries_count"],
+            "tip": data["fork_tip"],
+        })
+        hist = hist[-max_points:]
+        with open(hist_path, "w") as f:
+            json.dump(hist, f, separators=(",", ":"))
+    except Exception:
+        pass
+
+
 def write_census(db_path: str, out_path: str, generated_ts: int,
                  fork_tip: Optional[int] = None, sensor_peers: Optional[list] = None,
                  fork_headline: str = "8-30 NYPost Deride And Conquer",
-                 anchor_height: int = 961640, interval_seconds: int = 7200) -> dict:
+                 anchor_height: int = 961640, interval_seconds: int = 7200,
+                 fresh_hours: int = 24) -> dict:
     data = build_census(db_path, generated_ts, fork_tip, sensor_peers,
-                        fork_headline, anchor_height, interval_seconds)
+                        fork_headline, anchor_height, interval_seconds, fresh_hours)
     with open(out_path, "w") as f:
         json.dump(data, f, separators=(",", ":"))
+    append_history(out_path, data)
     return data
