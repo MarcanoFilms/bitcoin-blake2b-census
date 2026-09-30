@@ -12,6 +12,8 @@ DATADIR="${BITCOIN_DATADIR:-/mnt/t7/asus-fullnode/bitcoin}"
 CLI="${BITCOIN_CLI:-bitcoin-cli} -datadir=$DATADIR"
 DURATION="${CENSUS_DURATION:-600}"
 CONCURRENCY="${CENSUS_CONCURRENCY:-10}"
+# Should match the systemd timer period so the page's "next update" countdown is accurate.
+INTERVAL="${CENSUS_INTERVAL:-3600}"
 
 cd "$ROOT"
 mkdir -p "$ROOT/data" "$WEB"
@@ -47,7 +49,7 @@ SENSOR_JSON=$($CLI getpeerinfo 2>/dev/null \
 
 # --- export data.json ---
 GEN_TS=$(date +%s)
-FORK_TIP="$FORK_TIP" SENSOR="$SENSOR_JSON" GEN_TS="$GEN_TS" DB="$DB" OUT="$WEB/data.json" \
+FORK_TIP="$FORK_TIP" SENSOR="$SENSOR_JSON" GEN_TS="$GEN_TS" DB="$DB" OUT="$WEB/data.json" INTERVAL="$INTERVAL" \
 "$PY" - <<'PYEOF'
 import os, json
 from knots_network_crawler.census import write_census
@@ -56,6 +58,7 @@ d = write_census(
     generated_ts=int(os.environ["GEN_TS"]),
     fork_tip=int(os.environ["FORK_TIP"]) or None,
     sensor_peers=json.loads(os.environ["SENSOR"]),
+    interval_seconds=int(os.environ["INTERVAL"]),
 )
 print(f"census: {d['fork_reachable']} reachable / {d['total_estimate']} est / {d['countries_count']} countries / tip {d['fork_tip']}")
 PYEOF
