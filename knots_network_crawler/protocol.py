@@ -219,6 +219,62 @@ def build_verack() -> bytes:
     return build_message(CMD_VERACK, b"")
 
 
+async def open_socks5_connection(proxy_host: str, proxy_port: int,
+                                 dest_host: str, dest_port: int):
+    """Minimal SOCKS5 CONNECT (no auth) to dest_host:dest_port through a proxy.
+    Used to reach .onion (Tor) and .i2p (i2pd) peers via their local SOCKS ports.
+    Returns (reader, writer) like asyncio.open_connection."""
+    import asyncio
+    reader, writer = await asyncio.open_connection(proxy_host, proxy_port)
+    try:
+        # greeting: SOCKS5, 1 method, no-auth (0x00)
+        writer.write(b"\x05\x01\x00"); await writer.drain()
+        greet = await reader.readexactly(2)
+        if greet[0] != 0x05 or greet[1] != 0x00:
+            raise BitcoinProtocolError("socks5 no-auth rejected")
+        # CONNECT to a domain name (atyp=3): onion/i2p are hostnames, not IPs
+        host = dest_host.encode("idna") if False else dest_host.encode()
+        if len(host) > 255:
+            raise BitcoinProtocolError("socks5 host too long")
+        writer.write(b"\x05\x01\x00\x03" + bytes([len(host)]) + host +
+                     int(dest_port).to_bytes(2, "big"))
+        await writer.drain()
+        rep = await reader.readexactly(4)
+        if rep[1] != 0x00:
+            raise BitcoinProtocolError(f"socks5 connect failed (rep={rep[1]})")
+        atyp = rep[3]
+        if atyp == 0x01:
+            await reader.readexactly(4)
+        elif atyp == 0x03:
+            ln = await reader.readexactly(1)
+            await reader.readexactly(ln[0])
+        elif atyp == 0x04:
+            await reader.readexactly(16)
+        await reader.readexactly(2)  # bound port
+        return reader, writer
+    except Exception:
+        try:
+            writer.close()
+        except Exception:
+            pass
+        raise
+
+
+async def open_p2p_connection(host: str, port: int, *, tor_socks=None, i2p_socks=None,
+                              timeout: float = 15.0):
+    """Open a P2P stream, routing .onion via Tor SOCKS and .i2p via i2pd SOCKS,
+    everything else direct. tor_socks/i2p_socks are (host, port) tuples or None."""
+    import asyncio
+    h = (host or "").lower()
+    if h.endswith(".onion") and tor_socks:
+        coro = open_socks5_connection(tor_socks[0], tor_socks[1], host, port)
+    elif h.endswith(".i2p") and i2p_socks:
+        coro = open_socks5_connection(i2p_socks[0], i2p_socks[1], host, port)
+    else:
+        coro = asyncio.open_connection(host, port)
+    return await asyncio.wait_for(coro, timeout=timeout)
+
+
 def build_getaddr() -> bytes:
     return build_message(CMD_GETADDR, b"")
 
@@ -387,13 +443,21 @@ def _addrv2_raw_to_ip(network_id: int, raw: bytes) -> Optional[str]:
         if len(raw) != 16:
             return None
         return str(ipaddress.IPv6Address(raw))
-    elif network_id == 3:  # Tor v2 (ignore for crawler)
+    elif network_id == 3:  # Tor v2 (deprecated, unreachable)
         return None
-    elif network_id == 4:  # Tor v3
-        return None
-    elif network_id == 5:  # I2P
-        return None
-    elif network_id == 6:  # CJDNS
+    elif network_id == 4:  # Tor v3: raw = 32-byte ed25519 pubkey
+        if len(raw) != 32:
+            return None
+        import base64, hashlib
+        ver = b"\x03"
+        checksum = hashlib.sha3_256(b".onion checksum" + raw + ver).digest()[:2]
+        return base64.b32encode(raw + checksum + ver).decode().lower() + ".onion"
+    elif network_id == 5:  # I2P: raw = 32-byte SHA-256 of the destination
+        if len(raw) != 32:
+            return None
+        import base64
+        return base64.b32encode(raw).decode().lower().rstrip("=") + ".b32.i2p"
+    elif network_id == 6:  # CJDNS (would need a CJDNS route; skip)
         return None
     else:
         # Unknown / future

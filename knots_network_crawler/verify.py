@@ -36,6 +36,7 @@ from .protocol import (
     build_verack,
     hash_display_to_internal,
     make_version_message,
+    open_p2p_connection,
     parse_headers_first_prevblock,
     parse_headers_summary,
     read_message,
@@ -56,6 +57,7 @@ async def _read_until_headers(reader, read_timeout: float, budget: float) -> Opt
 async def probe_node(ip: str, port: int, anchor: bytes, anchor_stop: bytes,
                      tip_height: Optional[int], tip_header: Optional[bytes], tip_stop: bytes,
                      height_locators: List[Tuple[bytes, int]], header_size: int = 80,
+                     tor_socks=None, i2p_socks=None,
                      connect_timeout: float = 10.0, read_timeout: float = 12.0
                      ) -> Tuple[str, Optional[int]]:
     """Return (status, verified_height). status is one of:
@@ -64,7 +66,8 @@ async def probe_node(ip: str, port: int, anchor: bytes, anchor_stop: bytes,
       'unreachable' — couldn't determine (connect/handshake/timeout) — leave as-is.
     Only a definitive answer changes is_fork; a timeout must not drop a good node."""
     try:
-        reader, writer = await asyncio.wait_for(asyncio.open_connection(ip, port), timeout=connect_timeout)
+        reader, writer = await open_p2p_connection(
+            ip, port, tor_socks=tor_socks, i2p_socks=i2p_socks, timeout=connect_timeout)
     except Exception:
         return "unreachable", None
     try:
@@ -150,7 +153,8 @@ async def verify_candidates(db: Database, cfg: CrawlerConfig,
         async with sem:
             status, vheight = await probe_node(
                 ip, port, anchor, anchor_stop, tip_height, tip_header_b, tip_stop_b, loc,
-                header_size=getattr(cfg, "fork_header_size", 80))
+                header_size=getattr(cfg, "fork_header_size", 80),
+                tor_socks=cfg.tor_socks_addr, i2p_socks=cfg.i2p_socks_addr)
             counts["checked"] += 1
             if status == "member":
                 await db.set_fork(ip, port, True, vheight)

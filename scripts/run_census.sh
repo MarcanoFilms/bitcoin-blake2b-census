@@ -18,17 +18,16 @@ INTERVAL="${CENSUS_INTERVAL:-3600}"
 cd "$ROOT"
 mkdir -p "$ROOT/data" "$WEB"
 
-# --- seeds (IPv4 only) ---
-# Outbound peers are listening nodes we're actually connected to (reliable), plus
-# a sample of the node's addrman for breadth. Inbound peers are skipped (they
-# can't be reached back at :8333). We keep only IPv4 — the crawler has no Tor/I2P
-# transport, so .onion/.i2p (and IPv6) seeds just burn the run's time on timeouts.
-IPV4_FILTER='import sys,json,re; f=re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")'
+# --- seeds ---
+# Outbound peers (reliable, we're connected to them) + a sample of the addrman.
+# We now reach .onion/.i2p via local SOCKS proxies, so seed those too — but cap
+# per type so slow Tor/I2P connects don't dominate the pass (IPv4 bootstraps fast;
+# the rest is discovered via addr gossip and crawled through SOCKS).
 SEEDS=$($CLI getpeerinfo 2>/dev/null \
-  | "$PY" -c "$IPV4_FILTER"$'\nips=[p["addr"].rsplit(":",1)[0] for p in json.load(sys.stdin) if p.get("addr") and not p.get("inbound")]\nprint(" ".join("--seed "+ip for ip in ips if f.match(ip)))' \
+  | "$PY" -c $'import sys,json,re\nf=re.compile(r"^\\d{1,3}(\\.\\d{1,3}){3}$")\nips=[p["addr"].rsplit(":",1)[0] for p in json.load(sys.stdin) if p.get("addr") and not p.get("inbound")]\nprint(" ".join("--seed "+ip for ip in ips if f.match(ip)))' \
   || true)
-ADDRMAN=$($CLI getnodeaddresses 800 2>/dev/null \
-  | "$PY" -c "$IPV4_FILTER"$'\nips=[x.get("address","") for x in json.load(sys.stdin)]\nprint(" ".join("--seed "+ip for ip in ips if f.match(ip)))' \
+ADDRMAN=$($CLI getnodeaddresses 0 2>/dev/null \
+  | "$PY" -c $'import sys,json,re\nf=re.compile(r"^\\d{1,3}(\\.\\d{1,3}){3}$")\na=json.load(sys.stdin)\nv4=[x["address"] for x in a if f.match(x.get("address",""))][:800]\ntor=[x["address"] for x in a if x.get("address","").endswith(".onion")][:150]\ni2p=[x["address"] for x in a if x.get("address","").endswith(".i2p")][:50]\nprint(" ".join("--seed "+s for s in v4+tor+i2p))' \
   || true)
 # Extra known-good nodes contributed by the community (host:port honored, so
 # nodes on non-standard ports are reached too).

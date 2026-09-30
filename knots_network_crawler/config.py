@@ -91,6 +91,26 @@ class CrawlerConfig:
     # node the anchor check confirms (they all accepted this exact block).
     fork_headline: str = "8-30 NYPost Deride And Conquer"
 
+    # Reach .onion / .i2p peers through local SOCKS proxies (tor / i2pd). None
+    # disables that transport. ~62% of Bitcoin nodes are Tor/I2P, so this is the
+    # single biggest coverage lever.
+    tor_socks: Optional[str] = "127.0.0.1:9050"
+    i2p_socks: Optional[str] = "127.0.0.1:4447"
+
+    def _socks_tuple(self, val):
+        if not val:
+            return None
+        host, _, port = val.rpartition(":")
+        return (host, int(port))
+
+    @property
+    def tor_socks_addr(self):
+        return self._socks_tuple(self.tor_socks)
+
+    @property
+    def i2p_socks_addr(self):
+        return self._socks_tuple(self.i2p_socks)
+
     # Output / behavior
     user_agent: str = "/knots-crawler:0.1.0/"
     our_services: int = 0   # we don't serve, 0 is fine

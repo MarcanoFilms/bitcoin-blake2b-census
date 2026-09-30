@@ -44,6 +44,7 @@ from .protocol import (
     build_verack,
     hash_display_to_internal,
     make_version_message,
+    open_p2p_connection,
     parse_addr_payload,
     parse_addrv2_payload,
     parse_headers_first_prevblock,
@@ -334,9 +335,9 @@ class KnotsNetworkCrawler:
         start = time.perf_counter()
 
         try:
-            reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(ip, port),
-                timeout=self.cfg.connect_timeout,
+            reader, writer = await open_p2p_connection(
+                ip, port, tor_socks=self.cfg.tor_socks_addr,
+                i2p_socks=self.cfg.i2p_socks_addr, timeout=self.cfg.connect_timeout,
             )
         except Exception:
             # Connection failed or filtered - still record a "seen" if we want, but usually skip
@@ -525,20 +526,24 @@ class KnotsNetworkCrawler:
         new_enqueued = 0
         random.shuffle(addrs_received)  # fairness
         for addr in addrs_received[: self.cfg.max_addrs_per_peer]:
-            # Only IPv4 / IPv6, reasonable ports
-            if addr.port < 1024 or addr.port > 65535:
-                continue
-            try:
-                ipa = ipaddress.ip_address(addr.ip)
-                if ipa.is_private or ipa.is_loopback or ipa.is_link_local:
+            host = addr.ip or ""
+            if host.endswith(".onion") or host.endswith(".i2p"):
+                port = addr.port or 8333  # I2P often advertises port 0
+            else:
+                if addr.port < 1024 or addr.port > 65535:
                     continue
-            except Exception:
-                continue
+                try:
+                    ipa = ipaddress.ip_address(host)
+                    if ipa.is_private or ipa.is_loopback or ipa.is_link_local:
+                        continue
+                except Exception:
+                    continue
+                port = addr.port
 
-            key = addr.ip + ":" + str(addr.port)
+            key = host + ":" + str(port)
             if key not in self.seen:
                 self.seen.add(key)
-                await self.to_crawl.put((addr.ip, addr.port))
+                await self.to_crawl.put((host, port))
                 new_enqueued += 1
                 if new_enqueued > 180:  # per-peer discovery throttle
                     break
