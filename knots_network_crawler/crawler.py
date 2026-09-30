@@ -32,17 +32,21 @@ from .protocol import (
     BitcoinProtocolError,
     CMD_ADDR,
     CMD_ADDRV2,
+    CMD_HEADERS,
     CMD_PONG,
     CMD_VERACK,
     CMD_VERSION,
     NetAddr,
     build_getaddr,
+    build_getheaders,
     build_message,
     build_ping,
     build_verack,
+    hash_display_to_internal,
     make_version_message,
     parse_addr_payload,
     parse_addrv2_payload,
+    parse_headers_first_prevblock,
     parse_version_payload,
     read_message,
 )
@@ -82,6 +86,20 @@ class KnotsNetworkCrawler:
         self.concurrent = asyncio.Semaphore(config.max_concurrent)
         self.best_height: int = 0
         self._session_id: Optional[int] = None
+
+        # BLAKE2b fork detection: locator = the post-fork anchor block, in wire
+        # (internal, little-endian) order. A fork node returns a first header
+        # whose prev_block == this; a mainnet node falls back to genesis.
+        self._fork_locator: Optional[bytes] = (
+            hash_display_to_internal(config.fork_anchor_hash)
+            if getattr(config, "fork_detect", False) and getattr(config, "fork_anchor_hash", "")
+            else None
+        )
+        # hash_stop = block H+1, so a fork peer returns exactly one header.
+        self._fork_stop: bytes = (
+            hash_display_to_internal(getattr(config, "fork_stop_hash", "") or "")
+            if getattr(config, "fork_stop_hash", "") else b"\x00" * 32
+        )
 
         # For wave scheduling (reduces thundering herd)
         self._work_scheduled: Deque[float] = deque()
@@ -319,6 +337,7 @@ class KnotsNetworkCrawler:
         latency = None
         version_info = None
         addrs_received: List[NetAddr] = []
+        fork_verified = False
 
         try:
             # 1. Send version
@@ -363,6 +382,34 @@ class KnotsNetworkCrawler:
 
             if not version_received:
                 return
+
+            # 2b. Chain-verify BLAKE2b fork membership: ask for headers using the
+            # post-fork anchor as locator. Only a node on the fork chain has that
+            # block and replies with a header building on it (prev_block == anchor).
+            if self._fork_locator is not None:
+                writer.write(build_getheaders([self._fork_locator], hash_stop=self._fork_stop))
+                await writer.drain()
+                # The peer sends its post-verack burst (sendheaders/sendcmpct/
+                # feefilter/ping, sometimes a large addr) before the headers
+                # reply, so give the exchange a generous window and keep reading
+                # past unrelated messages until the headers arrive.
+                # The headers reply can be ~160 KB (up to 2000 headers) and, under
+                # concurrency over a VPN, arrive several seconds after the peer's
+                # sendcmpct/ping/getheaders/feefilter burst. Keep reading past those
+                # with a generous window so we don't miss it.
+                hdr_deadline = time.time() + 45.0
+                while time.time() < hdr_deadline:
+                    try:
+                        cmd, payload = await asyncio.wait_for(
+                            read_message(reader, timeout=self.cfg.read_timeout),
+                            timeout=25.0,
+                        )
+                    except (asyncio.TimeoutError, BitcoinProtocolError):
+                        break
+                    if cmd == CMD_HEADERS:
+                        prev = parse_headers_first_prevblock(payload)
+                        fork_verified = (prev == self._fork_locator)
+                        break
 
             # 3. Send getaddr
             writer.write(build_getaddr())
@@ -439,6 +486,9 @@ class KnotsNetworkCrawler:
         # Detect Knots - common patterns
         ua = (node.subversion or "").lower()
         node.is_knots = "knots" in ua or ".knots" in ua
+
+        # Chain-verified BLAKE2b fork membership (independent of user agent)
+        node.is_fork = fork_verified
 
         # GeoIP
         node.geo = self.geo.lookup(ip)

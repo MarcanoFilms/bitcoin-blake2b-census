@@ -43,6 +43,7 @@ class Node:
     # Reachability
     services_listening: bool = False   # NODE_NETWORK (bit 0) set
     is_knots: bool = False             # detected from subversion
+    is_fork: bool = False              # chain-verified BLAKE2b fork member (getheaders anchor)
 
     # Timing
     first_seen: Optional[str] = None

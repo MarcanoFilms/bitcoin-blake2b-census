@@ -66,6 +66,20 @@ class CrawlerConfig:
         "8.8.8.8:8333",   # placeholder, real list populated at runtime from DNS
     ])
 
+    # BLAKE2b fork detection (V2, chain-verified).
+    # We ask each peer for headers with a post-fork block as locator; only a node
+    # on the fork chain has it and returns the next header building on it. The
+    # locator is block height fork_anchor_height, and a fork node's reply has a
+    # first header whose prev_block == fork_anchor_hash (display/big-endian hex).
+    # fork_anchor_hash is the locator (block H); fork_stop_hash is block H+1, used
+    # as getheaders hash_stop so a fork peer replies with a SINGLE header (block
+    # H+1, whose prev_block == the locator) instead of a 2000-header/160 KB dump.
+    # That tiny reply keeps detection reliable under concurrency / limited egress.
+    fork_detect: bool = True
+    fork_anchor_height: int = 969999
+    fork_anchor_hash: str = "00000000000000015b596a7e73f1af6462b2c162a095e9727adaa5fef7cbed1d"
+    fork_stop_hash: str = "000000000000000096701f5472b2eca7703f6ec23d13f85042f0ad7b10c49ebf"
+
     # Output / behavior
     user_agent: str = "/knots-crawler:0.1.0/"
     our_services: int = 0   # we don't serve, 0 is fine

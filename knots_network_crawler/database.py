@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS nodes (
 
     services_listening INTEGER DEFAULT 0,
     is_knots INTEGER DEFAULT 0,
+    is_fork INTEGER DEFAULT 0,
 
     latency_ms REAL,
 
@@ -65,6 +66,7 @@ CREATE INDEX IF NOT EXISTS idx_nodes_country ON nodes(country);
 CREATE INDEX IF NOT EXISTS idx_nodes_asn ON nodes(asn);
 CREATE INDEX IF NOT EXISTS idx_nodes_listening ON nodes(services_listening);
 CREATE INDEX IF NOT EXISTS idx_nodes_knots ON nodes(is_knots);
+CREATE INDEX IF NOT EXISTS idx_nodes_fork ON nodes(is_fork);
 CREATE INDEX IF NOT EXISTS idx_nodes_height ON nodes(start_height);
 
 CREATE TABLE IF NOT EXISTS crawl_sessions (
@@ -150,6 +152,7 @@ class Database:
 
         services_listening = 1 if node.services_listening else 0
         is_knots = 1 if node.is_knots else 0
+        is_fork = 1 if node.is_fork else 0
 
         if is_new:
             await self._conn.execute(
@@ -157,15 +160,15 @@ class Database:
                 INSERT INTO nodes (
                     ip, port, first_seen, last_seen, last_crawled,
                     version, subversion, services, user_agent, start_height,
-                    services_listening, is_knots, latency_ms,
+                    services_listening, is_knots, is_fork, latency_ms,
                     country, country_code, city, asn, asn_org, latitude, longitude,
                     crawl_count, last_height_delta
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     node.ip, node.port, now, now, now,
                     node.version, node.subversion, node.services, node.user_agent, node.start_height,
-                    services_listening, is_knots, node.latency_ms,
+                    services_listening, is_knots, is_fork, node.latency_ms,
                     node.geo.country, node.geo.country_code, node.geo.city,
                     node.geo.asn, node.geo.asn_org, node.geo.latitude, node.geo.longitude,
                     1, height_delta,
@@ -220,6 +223,7 @@ class Database:
                 start_height = COALESCE(?, start_height),
                 services_listening = ?,
                 is_knots = ?,
+                is_fork = ?,
                 latency_ms = ?,
                 country = ?,
                 country_code = ?,
@@ -236,7 +240,7 @@ class Database:
                 new_last_seen,
                 new_last_crawled,
                 node.version, node.subversion, node.services, node.user_agent, node.start_height,
-                services_listening, is_knots, new_latency,
+                services_listening, is_knots, is_fork, new_latency,
                 geo_country, geo_cc, geo_city, geo_asn, geo_asn_org, geo_lat, geo_lon,
                 new_crawl_count,
                 height_delta,
@@ -463,6 +467,7 @@ class Database:
             start_height=row["start_height"],
             services_listening=bool(row["services_listening"]),
             is_knots=bool(row["is_knots"]),
+            is_fork=bool(row["is_fork"]),
             latency_ms=row["latency_ms"],
             geo=geo,
             crawl_count=row["crawl_count"] or 0,

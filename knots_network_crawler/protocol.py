@@ -45,6 +45,8 @@ CMD_ADDRV2 = b"addrv2".ljust(12, b"\x00")
 CMD_PING = b"ping".ljust(12, b"\x00")
 CMD_PONG = b"pong".ljust(12, b"\x00")
 CMD_REJECT = b"reject".ljust(12, b"\x00")
+CMD_GETHEADERS = b"getheaders".ljust(12, b"\x00")
+CMD_HEADERS = b"headers".ljust(12, b"\x00")
 
 # Our crawler identity
 CRAWLER_USER_AGENT = b"/knots-crawler:0.1.0/"
@@ -218,6 +220,38 @@ def build_verack() -> bytes:
 
 def build_getaddr() -> bytes:
     return build_message(CMD_GETADDR, b"")
+
+
+def hash_display_to_internal(hex_hash: str) -> bytes:
+    """Convert a display block hash (big-endian hex) to internal wire order
+    (little-endian 32 bytes), as used inside getheaders locators and headers."""
+    return bytes.fromhex(hex_hash)[::-1]
+
+
+def build_getheaders(locator_hashes: List[bytes],
+                     hash_stop: bytes = b"\x00" * 32,
+                     version: int = OUR_VERSION) -> bytes:
+    """Build a getheaders message. `locator_hashes` are 32-byte internal-order
+    hashes; `hash_stop` zeroed means 'give me as many as you have'."""
+    payload = struct.pack("<I", version)
+    payload += varint(len(locator_hashes))
+    for h in locator_hashes:
+        assert len(h) == 32
+        payload += h
+    payload += hash_stop
+    return build_message(CMD_GETHEADERS, payload)
+
+
+def parse_headers_first_prevblock(payload: bytes) -> Optional[bytes]:
+    """Return the prev_block field (internal order, 32 bytes) of the first
+    header in a `headers` message, or None if the message is empty/short.
+    We read prev_block rather than recomputing the block id, so this works
+    regardless of the chain's PoW/id hash function (SHA256d vs BLAKE2b)."""
+    count, off = read_varint(payload, 0)
+    if count == 0 or len(payload) < off + 80:
+        return None
+    # Header layout: version(4) | prev_block(32) | merkle_root(32) | ...
+    return payload[off + 4: off + 36]
 
 
 def build_ping(nonce: Optional[int] = None) -> bytes:
