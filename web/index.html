@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Oracle Knots · BLAKE2b Node Census</title>
-<!-- Sin dependencias externas (herramienta soberana): usamos el stack de fuentes del sistema. -->
+<!-- No external dependencies (sovereign tool): system font stack only. -->
 <style>
 :root{
   --bg-darkest:#05070e; --bg-darker:#090d1a; --bg-dark:#0f152b;
@@ -13,9 +13,10 @@
   --cyan:#00f0ff; --cyan-glow:rgba(0,240,255,0.2);
   --purple:#bd5eff; --purple-glow:rgba(189,94,255,0.2);
   --green:#00ffaa; --red:#ff4365; --orange:#ffb000;
+  --status-green-glow:rgba(0,255,170,.25);
   --text:#f1f5f9; --text-2:#94a3b8; --text-muted:#475569;
-  --sans:'Inter',system-ui,-apple-system,sans-serif;
-  --mono:'Fira Code',ui-monospace,Menlo,monospace;
+  --sans:'Inter',system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --mono:'Fira Code',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   --radius:14px;
 }
 *{box-sizing:border-box;margin:0;padding:0}
@@ -27,15 +28,18 @@ body{
   min-height:100vh; padding:32px 20px 80px; -webkit-font-smoothing:antialiased;
 }
 .wrap{max-width:1160px;margin:0 auto}
-header{display:flex;align-items:center;gap:18px;margin-bottom:8px}
+header{display:flex;align-items:center;gap:18px;margin-bottom:8px;flex-wrap:wrap}
 .owl{width:56px;height:56px;filter:drop-shadow(0 0 12px var(--cyan-glow))}
 h1{font-size:1.7rem;font-weight:800;letter-spacing:-.5px}
 h1 .b2b{background:linear-gradient(90deg,var(--cyan),var(--purple));-webkit-background-clip:text;background-clip:text;color:transparent}
 .sub{color:var(--text-2);font-size:.92rem;margin-top:2px}
+.hdr-right{margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:8px}
 .live{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:.72rem;color:var(--green);
-  border:1px solid rgba(0,255,170,.25);background:rgba(0,255,170,.06);padding:3px 10px;border-radius:999px;margin-left:auto}
+  border:1px solid rgba(0,255,170,.25);background:rgba(0,255,170,.06);padding:3px 10px;border-radius:999px}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:pulse 2s infinite}
 @keyframes pulse{50%{opacity:.35}}
+.refresh{font-family:var(--mono);font-size:.72rem;color:var(--text-2);text-align:right;line-height:1.5}
+.refresh b{color:var(--cyan);font-weight:600}
 .grid{display:grid;gap:16px;margin-top:26px}
 .stats{grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
 .card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);
@@ -76,7 +80,7 @@ footer a{color:var(--cyan);text-decoration:none}
 .headline{margin-top:22px}
 .headline .hl{font-family:var(--mono);font-size:1.5rem;font-weight:600;color:var(--green);
   background:rgba(0,255,170,.05);border-left:3px solid var(--green);border-radius:8px;
-  padding:16px 20px;text-shadow:0 0 18px var(--status-green-glow,rgba(0,255,170,.25))}
+  padding:16px 20px;text-shadow:0 0 18px var(--status-green-glow)}
 </style>
 </head>
 <body>
@@ -84,36 +88,59 @@ footer a{color:var(--cyan);text-decoration:none}
   <header>
     <svg class="owl" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
       <circle cx="32" cy="32" r="30" stroke="url(#g)" stroke-width="2" opacity=".5"/>
-      <circle cx="23" cy="28" r="9" stroke="var(--cyan)" stroke-width="2.5"/>
-      <circle cx="41" cy="28" r="9" stroke="var(--purple)" stroke-width="2.5"/>
-      <circle cx="23" cy="28" r="3.4" fill="var(--cyan)"/>
-      <circle cx="41" cy="28" r="3.4" fill="var(--purple)"/>
-      <path d="M28 40c1.5 2.5 6.5 2.5 8 0" stroke="var(--text-2)" stroke-width="2" stroke-linecap="round"/>
-      <path d="M32 34l-2.5 4h5z" fill="var(--orange)"/>
+      <circle cx="23" cy="28" r="9" stroke="#00f0ff" stroke-width="2.5"/>
+      <circle cx="41" cy="28" r="9" stroke="#bd5eff" stroke-width="2.5"/>
+      <circle cx="23" cy="28" r="3.4" fill="#00f0ff"/>
+      <circle cx="41" cy="28" r="3.4" fill="#bd5eff"/>
+      <path d="M28 40c1.5 2.5 6.5 2.5 8 0" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"/>
+      <path d="M32 34l-2.5 4h5z" fill="#ffb000"/>
       <defs><linearGradient id="g" x1="0" y1="0" x2="64" y2="64">
-        <stop stop-color="var(--cyan)"/><stop offset="1" stop-color="var(--purple)"/></linearGradient></defs>
+        <stop stop-color="#00f0ff"/><stop offset="1" stop-color="#bd5eff"/></linearGradient></defs>
     </svg>
     <div>
       <h1>Oracle Knots · <span class="b2b">BLAKE2b</span> Node Census</h1>
-      <div class="sub">Census de la red del fork medido por un crawler soberano — verificación por cadena, no por user-agent.</div>
+      <div class="sub">The fork's network, measured by a sovereign crawler — membership verified by chain, not by user agent.</div>
     </div>
-    <span class="live"><span class="dot"></span>LIVE</span>
+    <div class="hdr-right">
+      <span class="live"><span class="dot"></span>LIVE</span>
+      <div class="refresh" id="refresh">—</div>
+    </div>
   </header>
 
   <div id="app"></div>
 
   <footer>
-    Crawler propio · detección de fork verificada contra el ancla <span id="anchor" style="font-family:var(--mono)"></span> ·
-    actualizado <span id="upd">—</span><br>
-    Cifras sobre nodos <b>reachable</b> (aceptan conexiones entrantes) — un piso de la red real.
-    El estimado incluye nodos no-listening vistos por nuestro nodo.<br>
-    Hecho con 🦉 por <a href="https://marcanotrades.com">MarcanoFilms</a> · Oracle Knots
+    Sovereign crawler · fork membership verified against activation anchor <span id="anchor" style="font-family:var(--mono)"></span> · updated <span id="upd">—</span><br>
+    Figures cover <b>reachable</b> nodes (accept inbound) — a floor on the real network.
+    The estimate includes non-listening nodes seen by our own node.<br>
+    Made with 🦉 by <a href="https://marcanotrades.com">MarcanoFilms</a> · Oracle Knots
   </footer>
 </div>
 
 <script>
 const fmt = n => (n ?? 0).toLocaleString('en-US');
 const CC = c => c ? c.replace(/./g,ch=>String.fromCodePoint(127397+ch.charCodeAt())) : '🏴';
+
+function humanDur(s){
+  s = Math.max(0, Math.round(s));
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
+  if(h) return `${h}h ${m}m`;
+  if(m) return `${m}m ${sec}s`;
+  return `${sec}s`;
+}
+
+let _gen = 0, _interval = 7200;
+function tickRefresh(){
+  if(!_gen) return;
+  const now = Date.now()/1000;
+  const ago = now - _gen;
+  const next = _gen + _interval - now;
+  const el = document.getElementById('refresh');
+  el.innerHTML = next > 0
+    ? `updated <b>${humanDur(ago)} ago</b> · next in <b>${humanDur(next)}</b>`
+    : `updated <b>${humanDur(ago)} ago</b> · <b>refresh due…</b>`;
+}
+setInterval(tickRefresh, 1000);
 
 function bars(obj, max, label=x=>x){
   const entries = Object.entries(obj||{}).slice(0,max);
@@ -123,51 +150,53 @@ function bars(obj, max, label=x=>x){
       <span class="name">${label(k)}</span>
       <span class="track"><span class="fill" style="width:${Math.max(4,v/top*100)}%"></span></span>
       <span class="n">${fmt(v)}</span>
-    </div>`).join('') || '<div class="hint">sin datos</div>';
+    </div>`).join('') || '<div class="hint">no data</div>';
 }
 
 function render(d){
-  document.getElementById('upd').textContent = new Date(d.generated*1000).toLocaleString('es');
+  _gen = d.generated; _interval = d.interval_seconds || 7200;
+  document.getElementById('upd').textContent = new Date(d.generated*1000).toLocaleString('en-US');
   if(d.anchor_height) document.getElementById('anchor').textContent = '#'+fmt(d.anchor_height);
+  tickRefresh();
   const countryLabel = cc => `${CC(cc)} ${cc}`;
   const headline = d.fork_headline ? `
   <div class="card headline">
     <h2 style="margin-bottom:10px">Canonical headline · <span style="color:var(--green)">consensus</span></h2>
     <div class="hl">${d.fork_headline}</div>
-    <div class="hint" style="margin-top:8px">Grabado en el coinbase del bloque de activación #${fmt(d.anchor_height)}. Cada nodo del census aceptó exactamente este bloque — la detección lo verifica por cadena.</div>
+    <div class="hint" style="margin-top:8px">Etched into the coinbase of activation block #${fmt(d.anchor_height)}. Every node in this census accepted exactly this block — detection verifies it by chain.</div>
   </div>` : '';
   const html = headline + `
   <div class="grid stats">
-    <div class="card stat"><div class="label">Nodos reachable</div>
+    <div class="card stat"><div class="label">Reachable nodes</div>
       <div class="val cyan">${fmt(d.fork_reachable)}</div>
-      <div class="hint">del fork, verificados por cadena</div></div>
-    <div class="card stat"><div class="label">Estimado total</div>
+      <div class="hint">fork, chain-verified</div></div>
+    <div class="card stat"><div class="label">Total estimate</div>
       <div class="val purple">${fmt(d.total_estimate)}</div>
-      <div class="hint">+${fmt(d.non_listening_seen)} no-listening vistos</div></div>
-    <div class="card stat"><div class="label">Países</div>
+      <div class="hint">+${fmt(d.non_listening_seen)} non-listening seen</div></div>
+    <div class="card stat"><div class="label">Countries</div>
       <div class="val">${fmt(d.countries_count)}</div>
-      <div class="hint">distribución geográfica</div></div>
-    <div class="card stat"><div class="label">Altura del fork</div>
+      <div class="hint">geographic distribution</div></div>
+    <div class="card stat"><div class="label">Fork height</div>
       <div class="val" style="font-size:1.7rem">${fmt(d.fork_tip)}</div>
-      <div class="hint">${fmt(d.heights.tip)} en el tip · ${fmt(d.heights.behind)} atrasados</div></div>
+      <div class="hint">${fmt(d.heights.tip)} at tip · ${fmt(d.heights.behind)} behind</div></div>
   </div>
 
   <div class="grid" style="margin-top:16px">
     <div class="card">
-      <h2>Composición de servicios</h2>
+      <h2>Service composition</h2>
       <div class="svc">
         <div class="b"><div class="n" style="color:var(--cyan)">${fmt(d.services.full)}</div><div class="l">Full node</div></div>
         <div class="b"><div class="n" style="color:var(--orange)">${fmt(d.services.pruned)}</div><div class="l">Pruned</div></div>
         <div class="b"><div class="n">${fmt(d.services.witness)}</div><div class="l">Witness</div></div>
         <div class="b"><div class="n">${fmt(d.services.compact_filters)}</div><div class="l">Compact filters</div></div>
-        <div class="b"><div class="n" style="color:var(--green)">${fmt(d.services.v2_transport)}</div><div class="l">Transporte v2</div></div>
+        <div class="b"><div class="n" style="color:var(--green)">${fmt(d.services.v2_transport)}</div><div class="l">v2 transport</div></div>
       </div>
     </div>
   </div>
 
   <div class="grid cols" style="margin-top:16px">
-    <div class="card"><h2>Top países</h2>${bars(d.by_country,10,countryLabel)}</div>
-    <div class="card"><h2>Versiones</h2>${bars(d.by_version,10)}</div>
+    <div class="card"><h2>Top countries</h2>${bars(d.by_country,10,countryLabel)}</div>
+    <div class="card"><h2>Versions</h2>${bars(d.by_version,10)}</div>
   </div>
 
   <div class="grid" style="margin-top:16px">
@@ -176,9 +205,9 @@ function render(d){
 
   <div class="grid" style="margin-top:16px">
     <div class="card">
-      <h2>Nodos reachable (${fmt(d.nodes.length)})</h2>
+      <h2>Reachable nodes (${fmt(d.nodes.length)})</h2>
       <div class="tbl-wrap"><table>
-        <thead><tr><th>IP</th><th>País</th><th>Versión</th><th>Altura</th><th>Flags</th></tr></thead>
+        <thead><tr><th>IP</th><th>Country</th><th>Version</th><th>Height</th><th>Flags</th></tr></thead>
         <tbody>${d.nodes.map(n=>`
           <tr><td class="ip">${n.ip}</td>
           <td>${CC(n.cc)} ${n.city||n.country||''}</td>
@@ -192,11 +221,15 @@ function render(d){
   document.getElementById('app').innerHTML = html;
 }
 
-// Cache-buster only over http(s); under file:// a query string breaks URL parsing.
-fetch(location.protocol==='file:' ? 'data.json' : 'data.json?t='+Date.now())
-  .then(r=>{if(!r.ok)throw new Error('data.json '+r.status);return r.json()})
-  .then(render)
-  .catch(e=>{document.getElementById('app').innerHTML='<div class="card err">No pude cargar data.json: '+e.message+'</div>'});
+function load(){
+  fetch(location.protocol==='file:' ? 'data.json' : 'data.json?t='+Date.now())
+    .then(r=>{if(!r.ok)throw new Error('data.json '+r.status);return r.json()})
+    .then(render)
+    .catch(e=>{document.getElementById('app').innerHTML='<div class="card err">Couldn\'t load data.json: '+e.message+'</div>'});
+}
+load();
+// Re-fetch every 5 min so an open tab picks up new census data without a manual reload.
+setInterval(load, 300000);
 </script>
 </body>
 </html>

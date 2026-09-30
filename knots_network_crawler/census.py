@@ -32,7 +32,8 @@ def _svc(services: Optional[int], bit: int) -> bool:
 def build_census(db_path: str, generated_ts: int, fork_tip: Optional[int] = None,
                  sensor_peers: Optional[list] = None,
                  fork_headline: str = "8-30 NYPost Deride And Conquer",
-                 anchor_height: int = 961640) -> dict:
+                 anchor_height: int = 961640,
+                 interval_seconds: int = 7200) -> dict:
     """Read the crawler DB and return a census dict ready to serialize."""
     con = sqlite3.connect(db_path)
     con.row_factory = sqlite3.Row
@@ -96,6 +97,7 @@ def build_census(db_path: str, generated_ts: int, fork_tip: Optional[int] = None
 
     return {
         "generated": generated_ts,
+        "interval_seconds": interval_seconds,
         "fork_headline": fork_headline,
         "anchor_height": anchor_height,
         "fork_tip": tip,
@@ -116,9 +118,9 @@ def build_census(db_path: str, generated_ts: int, fork_tip: Optional[int] = None
 def write_census(db_path: str, out_path: str, generated_ts: int,
                  fork_tip: Optional[int] = None, sensor_peers: Optional[list] = None,
                  fork_headline: str = "8-30 NYPost Deride And Conquer",
-                 anchor_height: int = 961640) -> dict:
+                 anchor_height: int = 961640, interval_seconds: int = 7200) -> dict:
     data = build_census(db_path, generated_ts, fork_tip, sensor_peers,
-                        fork_headline, anchor_height)
+                        fork_headline, anchor_height, interval_seconds)
     with open(out_path, "w") as f:
         json.dump(data, f, separators=(",", ":"))
     return data
