@@ -45,3 +45,8 @@ data/GeoLite2-*
 # User config
 .env
 config.local.*
+
+# SQLite sidecar files
+data/*.db-shm
+data/*.db-wal
+data/*.db-journal
