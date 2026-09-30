@@ -73,6 +73,10 @@ td.ip{font-family:var(--mono);color:var(--text)}
 footer{margin-top:34px;text-align:center;color:var(--text-muted);font-size:.8rem;line-height:1.7}
 footer a{color:var(--cyan);text-decoration:none}
 .err{color:var(--red);font-family:var(--mono);padding:20px}
+.headline{margin-top:22px}
+.headline .hl{font-family:var(--mono);font-size:1.5rem;font-weight:600;color:var(--green);
+  background:rgba(0,255,170,.05);border-left:3px solid var(--green);border-radius:8px;
+  padding:16px 20px;text-shadow:0 0 18px var(--status-green-glow,rgba(0,255,170,.25))}
 </style>
 </head>
 <body>
@@ -124,8 +128,15 @@ function bars(obj, max, label=x=>x){
 
 function render(d){
   document.getElementById('upd').textContent = new Date(d.generated*1000).toLocaleString('es');
+  if(d.anchor_height) document.getElementById('anchor').textContent = '#'+fmt(d.anchor_height);
   const countryLabel = cc => `${CC(cc)} ${cc}`;
-  const html = `
+  const headline = d.fork_headline ? `
+  <div class="card headline">
+    <h2 style="margin-bottom:10px">Canonical headline · <span style="color:var(--green)">consensus</span></h2>
+    <div class="hl">${d.fork_headline}</div>
+    <div class="hint" style="margin-top:8px">Grabado en el coinbase del bloque de activación #${fmt(d.anchor_height)}. Cada nodo del census aceptó exactamente este bloque — la detección lo verifica por cadena.</div>
+  </div>` : '';
+  const html = headline + `
   <div class="grid stats">
     <div class="card stat"><div class="label">Nodos reachable</div>
       <div class="val cyan">${fmt(d.fork_reachable)}</div>
@@ -181,7 +192,8 @@ function render(d){
   document.getElementById('app').innerHTML = html;
 }
 
-fetch('data.json?t='+Date.now())
+// Cache-buster only over http(s); under file:// a query string breaks URL parsing.
+fetch(location.protocol==='file:' ? 'data.json' : 'data.json?t='+Date.now())
   .then(r=>{if(!r.ok)throw new Error('data.json '+r.status);return r.json()})
   .then(render)
   .catch(e=>{document.getElementById('app').innerHTML='<div class="card err">No pude cargar data.json: '+e.message+'</div>'});

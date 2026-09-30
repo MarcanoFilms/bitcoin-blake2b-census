@@ -393,16 +393,16 @@ class KnotsNetworkCrawler:
                 # feefilter/ping, sometimes a large addr) before the headers
                 # reply, so give the exchange a generous window and keep reading
                 # past unrelated messages until the headers arrive.
-                # The headers reply can be ~160 KB (up to 2000 headers) and, under
-                # concurrency over a VPN, arrive several seconds after the peer's
-                # sendcmpct/ping/getheaders/feefilter burst. Keep reading past those
-                # with a generous window so we don't miss it.
-                hdr_deadline = time.time() + 45.0
+                # With hash_stop set, a fork peer's reply is a single ~81-byte
+                # header that arrives right after its sendcmpct/ping/getheaders/
+                # feefilter burst, so a short window keeps the crawl fast while
+                # staying reliable.
+                hdr_deadline = time.time() + 25.0
                 while time.time() < hdr_deadline:
                     try:
                         cmd, payload = await asyncio.wait_for(
                             read_message(reader, timeout=self.cfg.read_timeout),
-                            timeout=25.0,
+                            timeout=12.0,
                         )
                     except (asyncio.TimeoutError, BitcoinProtocolError):
                         break

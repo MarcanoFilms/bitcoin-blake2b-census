@@ -71,14 +71,21 @@ class CrawlerConfig:
     # on the fork chain has it and returns the next header building on it. The
     # locator is block height fork_anchor_height, and a fork node's reply has a
     # first header whose prev_block == fork_anchor_hash (display/big-endian hex).
-    # fork_anchor_hash is the locator (block H); fork_stop_hash is block H+1, used
-    # as getheaders hash_stop so a fork peer replies with a SINGLE header (block
-    # H+1, whose prev_block == the locator) instead of a 2000-header/160 KB dump.
-    # That tiny reply keeps detection reliable under concurrency / limited egress.
+    # The anchor is the BLAKE2b ACTIVATION block itself (the one whose coinbase
+    # carries the canonical headline). It is the block that *defines* the fork:
+    # it can never reorg out and the anchor never needs updating. fork_anchor_hash
+    # is the locator; fork_stop_hash is its child, used as getheaders hash_stop so
+    # a fork peer replies with a SINGLE header (whose prev_block == the locator)
+    # instead of a 2000-header/160 KB dump. A mainnet node lacks this fork-only
+    # block and falls back to genesis.
     fork_detect: bool = True
-    fork_anchor_height: int = 969999
-    fork_anchor_hash: str = "00000000000000015b596a7e73f1af6462b2c162a095e9727adaa5fef7cbed1d"
-    fork_stop_hash: str = "000000000000000096701f5472b2eca7703f6ec23d13f85042f0ad7b10c49ebf"
+    fork_anchor_height: int = 961640
+    fork_anchor_hash: str = "0000000000000050c1e5f69672f459293be14f46e5a494e7a8c8541396f18eeb"
+    fork_stop_hash: str = "0000000000000010ef13157db08c138ea82aa1ac0ec360bdb9f101ce3ed7f7b6"
+    # Genesis-style headline in the activation block's coinbase — the fork's
+    # consensus signature. Shown on the census page; implicitly enforced by every
+    # node the anchor check confirms (they all accepted this exact block).
+    fork_headline: str = "8-30 NYPost Deride And Conquer"
 
     # Output / behavior
     user_agent: str = "/knots-crawler:0.1.0/"

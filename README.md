@@ -1,190 +1,98 @@
-# knots-network-crawler
+# Oracle Knots · BLAKE2b Node Census
 
-**A serious, sovereign Bitcoin network crawler** focused on discovering the maximum number of real nodes (especially **Bitcoin Knots**) using actual P2P protocol (`version` / `getaddr` / `addr`), enriching them with **MaxMind GeoLite2**, and giving you powerful terminal analysis + exports.
+A **sovereign crawler and census for the Bitcoin Knots BLAKE2b fork** (XBT / BTCB2).
+It discovers reachable nodes over the real P2P protocol, **verifies fork
+membership by the chain a node follows — not by its user agent**, enriches
+everything with GeoIP, estimates the non-listening population with a passive
+sensor, and renders it all on a self-contained web page.
 
-Designed for a decent machine (i5 / Ryzen 5 + 16-32 GB RAM). Aggressive but **configurable and responsible**.
+No third-party APIs. No external fonts or trackers. Your node, your seed, your data.
+
+## Why chain verification (V2)
+
+The BLAKE2b fork shares Bitcoin mainnet's network magic and port 8333, and its
+nodes run **vanilla Knots binaries** — their user agent (`/Satoshi:29.4.2/Knots:…/`)
+is indistinguishable from a mainnet Knots node. Filtering by user agent is therefore
+wrong: it catches mainnet Knots too, and misses nothing about the actual chain.
+
+Instead, after the version handshake the crawler sends a `getheaders` with a
+**post-fork block as the locator and its child as `hash_stop`**:
+
+- A node **on the fork chain** has that block and replies with a single header
+  whose `prev_block` equals the locator → **fork member**.
+- A **mainnet** node doesn't have it and falls back to genesis → not a member.
+
+Reading `prev_block` (instead of recomputing a block id) makes this agnostic to
+whether the chain's id hash is SHA256d or BLAKE2b. The single-header `hash_stop`
+reply (~81 bytes vs a 160 KB, 2000-header dump) keeps detection fast and reliable
+under concurrency over a VPN.
+
+The anchor is configurable in [`config.py`](knots_network_crawler/config.py)
+(`fork_anchor_hash` / `fork_stop_hash`).
 
 ## Features
 
-- Real P2P crawling (no relying on third-party APIs like Bitnodes).
-- High concurrency with asyncio + semaphores (Normal vs Aggressive modes).
-- Excellent GeoIP (country, city, ASN, lat/long) via official free MaxMind databases.
-- Rich data model in SQLite: version, subversion, services (listening detection), height + delta, latency, first/last seen, full GeoIP, crawl history.
-- Knots detection (looks for "knots" in user agent).
-- Beautiful retro yellow-on-black `rich` terminal UI.
-- Multiple analysis views: global stats, geo distribution, top height, Knots-only, Listening-only.
-- Exports: JSON (full), CSV (analysis), Graphviz DOT (for Gephi / graph analysis of network structure).
-- Resume-friendly: run it multiple times, it keeps accumulating and refreshing knowledge.
-- Configurable via CLI flags + environment variables.
+- Real P2P crawl (`version` / `getaddr` / `addr` / `addrv2`), asyncio, tunable concurrency.
+- **Chain-verified fork detection** as above (`is_fork`), independent of user agent.
+- **GeoIP** (country / city / ASN) via the free [DB-IP lite](https://db-ip.com/db/lite.php)
+  databases — no license key required.
+- **Passive non-listening sensor**: merges the inbound peers your own node sees
+  (`getpeerinfo`) that no crawler can reach, for a truer network-size estimate —
+  the same gap Luke Dashjr's counts close.
+- Service-bit composition (full / pruned / witness / compact filters / v2 transport).
+- Self-contained census page in the Oracle Knots look (`web/index.html`).
+- SQLite store that accumulates and refreshes across runs.
 
-## Installation
+## Install
 
 ```bash
-cd knots-network-crawler
-python -m venv .venv
-source .venv/bin/activate
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-# or pip install -e .
 ```
 
-After install you can run:
-```bash
-knots-network-crawler --help
-```
-
-Or directly:
-```bash
-python -m knots_network_crawler crawl --help
-```
-
-## GeoIP Setup (MANDATORY for good data)
-
-The crawler works without GeoIP (you just won't have country/ASN), but for serious analysis you want it.
-
-1. Create a free account at MaxMind: https://www.maxmind.com/en/geolite2/signup
-2. Generate a license key (Account → My License Keys).
-3. Download the two databases:
-   - **GeoLite2 City** (MMDB format)
-   - **GeoLite2 ASN** (MMDB format)
-4. Extract the `.mmdb` files and place them in `data/`:
-
-```
-data/
-  GeoLite2-City.mmdb
-  GeoLite2-ASN.mmdb
-  nodes.db          (created automatically)
-```
-
-There is a helper script:
-```bash
-bash scripts/download-geoip.sh
-```
-
-Environment variables you can use:
-```bash
-export KNOTS_GEOIP_CITY_MMDB=/path/to/GeoLite2-City.mmdb
-export KNOTS_GEOIP_ASN_MMDB=/path/to/GeoLite2-ASN.mmdb
-```
-
-## Quick Start
-
-### 1. Do a first crawl (Normal mode - recommended)
+### GeoIP databases (optional but recommended)
 
 ```bash
-knots-network-crawler crawl --mode normal -c 80 --max-nodes 8000
+cd data
+M=$(date +%Y-%m)
+curl -fsSL "https://download.db-ip.com/free/dbip-city-lite-$M.mmdb.gz" | gunzip > GeoLite2-City.mmdb
+curl -fsSL "https://download.db-ip.com/free/dbip-asn-lite-$M.mmdb.gz"  | gunzip > GeoLite2-ASN.mmdb
 ```
 
-### 2. Aggressive crawl (more discovery power)
+## Run
 
-On a good connection + machine this can discover a lot more:
+One-shot census (crawl → passive sensor → `web/data.json`), seeded from your own node:
 
 ```bash
-knots-network-crawler crawl --mode aggressive -c 280 --max-nodes 25000 --duration 14400
+BITCOIN_DATADIR=/path/to/datadir CENSUS_DURATION=600 ./scripts/run_census.sh
 ```
 
-### 3. Just update what you already know (no new discovery)
+Serve the page (any static server):
 
 ```bash
-knots-network-crawler crawl --only-known --concurrency 120
+python -m http.server 8891 --directory web
 ```
 
-### 4. Analysis
+Or run the crawler directly:
 
 ```bash
-# Global picture
-knots-network-crawler stats
-
-# Full geographic + hosting provider breakdown
-knots-network-crawler stats --geo
-
-# Best Knots nodes right now
-knots-network-crawler view --knots --limit 80
-
-# Most interesting reachable nodes (great for manual peering / mining)
-knots-network-crawler view --listening -n 100
-
-# Nodes claiming the highest block height
-knots-network-crawler view --top
+python -m knots_network_crawler crawl --mode normal --concurrency 10 --duration 600 --yes
+python -m knots_network_crawler stats
+python -m knots_network_crawler export --format json -o out.json --only-listening
 ```
 
-### 5. Export for external tools
+### Scheduled census (systemd --user)
 
-```bash
-# Full dataset
-knots-network-crawler export --format json -o data/full-nodes.json
+`census.service` + `census.timer` run the census every 2 hours; the persistent
+DB accumulates fork-node coverage across passes.
 
-# Only Knots for analysis
-knots-network-crawler export --format csv --only-knots -o knots-nodes.csv
+## Notes
 
-# Graphviz for Gephi / network mapping (highly recommended)
-knots-network-crawler export --format dot --only-listening -o listening-graph.dot
-```
-
-Open `listening-graph.dot` or the full export in Gephi to see ASN/country clusters, etc.
-
-## Configuration & Environment
-
-All important tunables can be set via flags or env vars (prefix `KNOTS_`):
-
-| Variable                    | Description                              | Default (Normal)     |
-|----------------------------|------------------------------------------|----------------------|
-| `KNOTS_MODE`               | normal / aggressive                      | normal               |
-| `KNOTS_MAX_CONCURRENT`     | Max simultaneous connections             | 80 (normal) / ~250 (agg) |
-| `KNOTS_DB_PATH`            | SQLite file                              | data/nodes.db        |
-| `KNOTS_MAX_NODES`          | Hard stop on attempts                    | 50000                |
-| `KNOTS_MAX_DURATION_SEC`   | Safety time limit                        | 6 hours              |
-| `KNOTS_GEOIP_*_MMDB`       | Explicit paths to mmdb files             | auto-detect in data/ |
-
-## Architecture Notes (for the curious / sovereign operator)
-
-- Pure asyncio P2P implementation (no heavy bitcoin libraries).
-- Proper message framing + checksums. Supports `addr` + `addrv2`.
-- Version handshake is honest but minimal (we don't relay or serve).
-- `getaddr` is the main discovery primitive. We are greedy but bounded per peer.
-- GeoIP is applied on every successful crawl (and merged intelligently - we don't overwrite good data with bad).
-- DB uses WAL + good indexes. Safe for concurrent reads while crawling.
-- The DOT export is intentionally node-only (no fabricated edges) because `getaddr` is a gossip view, not "current connections". This is still extremely useful when combined with ASN/country attributes.
-
-## Ethics & Responsibility
-
-- This tool can generate significant traffic. Use `--mode normal` by default.
-- Aggressive mode is for when you have a good reason and good connectivity.
-- Never point it at testnet/mainnet nodes you don't have permission for in a way that could be seen as abuse.
-- Many operators run similar crawlers (Bitnodes, Luke-Jr's crawler, etc.). You are participating in the public P2P network.
-
-## Recommended Workflow for a Sovereign Knots User / Miner
-
-1. Run a long aggressive crawl once every few weeks (or when you want fresh data).
-2. Regularly run `view --listening` + `view --knots`.
-3. Export the listening nodes and feed good candidates into your own node via `addnode` or just use them as trusted `connect=` peers if you want very sovereign outbound.
-4. Watch the ASN distribution — heavy concentration in a few providers is a centralization signal.
-5. Track how many Knots nodes exist vs Core over time (great for political / technical analysis).
-
-## Development / Hacking
-
-```bash
-pip install -e ".[dev]"
-```
-
-Structure is deliberately clean and modular:
-
-```
-knots_network_crawler/
-  cli.py          # Typer commands + live UI
-  config.py       # All tunables + mode logic
-  crawler.py      # The actual async engine
-  protocol.py     # Bitcoin wire messages (the serious part)
-  database.py     # Rich SQLite model + history
-  geoip.py        # MaxMind integration (graceful degradation)
-  models.py
-  views.py        # All rich rendering
-  exporters.py    # JSON / CSV / DOT
-```
-
-## License
-
-MIT. Use it to understand and strengthen the network.
+- Figures are for **reachable** (listening) fork nodes — a lower bound — plus a
+  non-listening estimate from the passive sensor.
+- Coverage of the fork set builds up over successive passes, since the fork lives
+  inside the larger shared P2P network and a single pass samples it.
 
 ---
 
-Built with respect for the cypherpunk / sovereign mindset. Run Knots. Verify everything.
+Made with 🦉 by [MarcanoFilms](https://marcanotrades.com) · Oracle Knots

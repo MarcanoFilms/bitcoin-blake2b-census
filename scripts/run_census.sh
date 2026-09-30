@@ -11,15 +11,22 @@ WEB="$ROOT/web"
 DATADIR="${BITCOIN_DATADIR:-/mnt/t7/asus-fullnode/bitcoin}"
 CLI="${BITCOIN_CLI:-bitcoin-cli} -datadir=$DATADIR"
 DURATION="${CENSUS_DURATION:-600}"
-CONCURRENCY="${CENSUS_CONCURRENCY:-20}"
+CONCURRENCY="${CENSUS_CONCURRENCY:-10}"
 
 cd "$ROOT"
 mkdir -p "$ROOT/data" "$WEB"
 
-# --- seeds: our node's peers (fork nodes) ---
+# --- seeds ---
+# Outbound peers are listening fork nodes we're actually connected to (reliable),
+# plus a sample of the node's addrman for breadth. Inbound peers are skipped:
+# they connected to us and usually can't be reached back at :8333.
 SEEDS=$($CLI getpeerinfo 2>/dev/null \
-  | "$PY" -c 'import sys,json; print(" ".join("--seed "+p["addr"].rsplit(":",1)[0] for p in json.load(sys.stdin) if p.get("addr")))' \
+  | "$PY" -c 'import sys,json; print(" ".join("--seed "+p["addr"].rsplit(":",1)[0] for p in json.load(sys.stdin) if p.get("addr") and not p.get("inbound")))' \
   || true)
+ADDRMAN=$($CLI getnodeaddresses 400 2>/dev/null \
+  | "$PY" -c 'import sys,json; a=json.load(sys.stdin); print(" ".join("--seed "+x["address"] for x in a if ":" not in x.get("address","")))' \
+  || true)
+SEEDS="$SEEDS $ADDRMAN"
 
 # --- crawl (persistent DB accumulates across runs) ---
 # shellcheck disable=SC2086
