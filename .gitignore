@@ -50,3 +50,7 @@ config.local.*
 data/*.db-shm
 data/*.db-wal
 data/*.db-journal
+
+# Durable records we DO want on GitHub (override *.csv / *.json above)
+!web/registry.csv
+!web/history.json
