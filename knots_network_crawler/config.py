@@ -82,6 +82,10 @@ class CrawlerConfig:
     fork_anchor_height: int = 961640
     fork_anchor_hash: str = "0000000000000050c1e5f69672f459293be14f46e5a494e7a8c8541396f18eeb"
     fork_stop_hash: str = "0000000000000010ef13157db08c138ea82aa1ac0ec360bdb9f101ce3ed7f7b6"
+    # The BLAKE2b PoW extends the block header beyond Bitcoin's 80 bytes; each
+    # `headers` entry is this many header bytes + a tx_count varint (usually 1).
+    # Needed to walk a headers reply for chain-verified height. (Bitcoin = 80.)
+    fork_header_size: int = 164
     # Genesis-style headline in the activation block's coinbase — the chain's
     # consensus signature. Shown on the census page; implicitly enforced by every
     # node the anchor check confirms (they all accepted this exact block).

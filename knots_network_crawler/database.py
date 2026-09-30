@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS nodes (
     services_listening INTEGER DEFAULT 0,
     is_knots INTEGER DEFAULT 0,
     is_fork INTEGER DEFAULT 0,
+    verified_height INTEGER,
 
     latency_ms REAL,
 
@@ -291,13 +292,20 @@ class Database:
         ) as cur:
             return [(r["ip"], r["port"]) for r in await cur.fetchall()]
 
-    async def set_fork(self, ip: str, port: int, is_fork: bool) -> None:
+    async def set_fork(self, ip: str, port: int, is_fork: bool,
+                       verified_height: Optional[int] = None) -> None:
         if not self._conn:
             await self.connect()
-        await self._conn.execute(
-            "UPDATE nodes SET is_fork = ? WHERE ip = ? AND port = ?",
-            (1 if is_fork else 0, ip, port),
-        )
+        if verified_height is not None:
+            await self._conn.execute(
+                "UPDATE nodes SET is_fork = ?, verified_height = ? WHERE ip = ? AND port = ?",
+                (1 if is_fork else 0, verified_height, ip, port),
+            )
+        else:
+            await self._conn.execute(
+                "UPDATE nodes SET is_fork = ? WHERE ip = ? AND port = ?",
+                (1 if is_fork else 0, ip, port),
+            )
         await self._conn.commit()
 
     async def get_listening_nodes(self, limit: int = 500) -> List[Node]:

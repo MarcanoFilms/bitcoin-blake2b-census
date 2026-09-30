@@ -244,18 +244,31 @@ def cmd_verify(
     concurrency: int = typer.Option(12, "--concurrency", "-c", help="Parallel membership probes"),
     limit: int = typer.Option(20000, "--limit", help="Max candidates to verify"),
 ) -> None:
-    """Phase 2: verify BLAKE2b membership for reachable Knots candidates
-    (version + single getheaders probe only, no getaddr)."""
+    """Phase 2: verify BLAKE2b membership + chain-verified height for reachable
+    Knots candidates (version + getheaders probes only, no getaddr).
+
+    The height reference (our tip, sampled once) is passed via env so every node
+    is measured against the same point: CENSUS_TIP_HEIGHT, CENSUS_TIP_HASH,
+    CENSUS_TIP_HEADER (raw 80-byte header hex), CENSUS_LOCATORS (JSON [[hash,height],…])."""
+    import os, json
     cfg = load_config(db_path=str(db) if db else None)
     d = _get_db(cfg.db_path)
     from .verify import verify_candidates
+
+    tip_height = int(os.environ["CENSUS_TIP_HEIGHT"]) if os.environ.get("CENSUS_TIP_HEIGHT") else None
+    tip_hash = os.environ.get("CENSUS_TIP_HASH") or None
+    tip_header = os.environ.get("CENSUS_TIP_HEADER") or None
+    locators = json.loads(os.environ["CENSUS_LOCATORS"]) if os.environ.get("CENSUS_LOCATORS") else None
 
     async def _run():
         await d.connect()
         candidates = await d.get_fork_candidates(limit)
         console.print(f"[yellow]Verifying[/yellow] {len(candidates)} candidates at concurrency {concurrency}…")
-        counts = await verify_candidates(d, cfg, candidates, concurrency=concurrency)
-        console.print(f"[green]Done:[/green] {counts['fork']} BLAKE2b / {counts['checked']} checked")
+        counts = await verify_candidates(d, cfg, candidates, concurrency=concurrency,
+                                         tip_height=tip_height, tip_hash=tip_hash,
+                                         tip_header=tip_header, locators=locators)
+        console.print(f"[green]Done:[/green] {counts['fork']} BLAKE2b / {counts['checked']} checked "
+                      f"({counts.get('heights',0)} heights)")
 
     asyncio.run(_run())
 

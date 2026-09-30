@@ -243,6 +243,27 @@ def build_getheaders(locator_hashes: List[bytes],
     return build_message(CMD_GETHEADERS, payload)
 
 
+def parse_headers_summary(payload: bytes, header_size: int = 80):
+    """Summarize a `headers` message for chain-verified height measurement.
+
+    Returns (count, first_prev_block, last_header) where first_prev_block is the
+    prev_block field (internal order) of the first header — i.e. which locator the
+    peer built its reply from — and last_header is the raw header of the last
+    entry (compared byte-for-byte against our own tip header, which sidesteps the
+    SHA256d-vs-BLAKE2b block-id question). Each entry is `header_size` header
+    bytes + a tx_count varint (0 → 1 byte). header_size is 80 on Bitcoin but
+    larger on the BLAKE2b chain (its PoW extends the header).
+    """
+    count, off = read_varint(payload, 0)
+    if count == 0 or len(payload) < off + header_size:
+        return 0, None, None
+    first_prev = payload[off + 4: off + 36]
+    stride = header_size + 1  # + tx_count varint (0)
+    last_off = off + (count - 1) * stride
+    last_header = payload[last_off: last_off + header_size] if len(payload) >= last_off + header_size else None
+    return count, first_prev, last_header
+
+
 def parse_headers_first_prevblock(payload: bytes) -> Optional[bytes]:
     """Return the prev_block field (internal order, 32 bytes) of the first
     header in a `headers` message, or None if the message is empty/short.

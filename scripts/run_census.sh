@@ -41,7 +41,23 @@ timeout -k 20 "$((DURATION + 90))" "$PY" -m knots_network_crawler crawl \
   --mode normal --concurrency "$CONCURRENCY" --duration "$DURATION" \
   --max-nodes 20000 --no-fork-detect --yes --db "$DB" $SEEDS >/dev/null 2>&1 || true
 
-# --- Phase 2: verify BLAKE2b membership for reachable Knots candidates ---
+# --- Height reference (sampled ONCE so every node is measured against it) ---
+# Our tip height/hash/raw-header + getheaders locators [tip-10,-100,-1000,anchor].
+export CENSUS_TIP_HEIGHT=$($CLI getblockcount 2>/dev/null || echo 0)
+if [ "$CENSUS_TIP_HEIGHT" -gt 0 ] 2>/dev/null; then
+  CENSUS_TIP_HASH=$($CLI getblockhash "$CENSUS_TIP_HEIGHT" 2>/dev/null)
+  export CENSUS_TIP_HASH
+  export CENSUS_TIP_HEADER=$($CLI getblockheader "$CENSUS_TIP_HASH" false 2>/dev/null)
+  ANCHOR_H=961640
+  ANCHOR_HASH=$($CLI getblockhash "$ANCHOR_H" 2>/dev/null)
+  LOC_JSON="[[\"$($CLI getblockhash $((CENSUS_TIP_HEIGHT-10)) 2>/dev/null)\",$((CENSUS_TIP_HEIGHT-10))]"
+  LOC_JSON="$LOC_JSON,[\"$($CLI getblockhash $((CENSUS_TIP_HEIGHT-100)) 2>/dev/null)\",$((CENSUS_TIP_HEIGHT-100))]"
+  LOC_JSON="$LOC_JSON,[\"$($CLI getblockhash $((CENSUS_TIP_HEIGHT-1000)) 2>/dev/null)\",$((CENSUS_TIP_HEIGHT-1000))]"
+  LOC_JSON="$LOC_JSON,[\"$ANCHOR_HASH\",$ANCHOR_H]]"
+  export CENSUS_LOCATORS="$LOC_JSON"
+fi
+
+# --- Phase 2: verify membership + chain-verified height for reachable candidates ---
 # Dedicated version+getheaders probes, no getaddr contention → reliable.
 timeout -k 20 "${CENSUS_VERIFY_TIMEOUT:-600}" "$PY" -m knots_network_crawler verify \
   --db "$DB" --concurrency "${CENSUS_VERIFY_CONCURRENCY:-12}" >/dev/null 2>&1 || true

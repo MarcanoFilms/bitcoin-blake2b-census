@@ -43,7 +43,15 @@ def build_census(db_path: str, generated_ts: int, fork_tip: Optional[int] = None
     con.close()
 
     reachable = [r for r in rows if r["services_listening"]]
-    heights = [r["start_height"] for r in reachable if r["start_height"]]
+
+    # Prefer the chain-verified height (measured against one reference tip in the
+    # verify phase) over the node's self-declared start_height, which drifts with
+    # crawl duration and can be spoofed.
+    def node_height(r):
+        vh = r["verified_height"] if "verified_height" in r.keys() else None
+        return vh if vh else r["start_height"]
+
+    heights = [node_height(r) for r in reachable if node_height(r)]
     tip = fork_tip or (max(heights) if heights else 0)
 
     def near(h):  # within 6 blocks of tip
@@ -67,10 +75,17 @@ def build_census(db_path: str, generated_ts: int, fork_tip: Optional[int] = None
         "v2_transport": sum(1 for r in reachable if _svc(r["services"], NODE_P2P_V2)),
     }
 
+    # Partition ALL reachable nodes so tip + behind + unknown == reachable count.
+    # Tolerance absorbs crawl-duration drift: start_height is sampled at connect
+    # time, and a pass spans several minutes during which new blocks are mined,
+    # so nodes contacted early look a few blocks behind even when fully synced.
+    TIP_TOLERANCE = 6
+    at_tip = sum(1 for h in heights if tip and (tip - h) <= TIP_TOLERANCE)
+    with_height = len(heights)
     height_buckets = {
-        "tip": sum(1 for h in heights if near(h)),
-        "near": sum(1 for h in heights if h is not None and tip and 6 < (tip - h) <= 144),
-        "behind": sum(1 for h in heights if h is not None and tip and (tip - h) > 144),
+        "tip": at_tip,
+        "behind": with_height - at_tip,          # has a height but below tip - tolerance
+        "unknown": len(reachable) - with_height,  # advertised no start height
     }
 
     # Passive sensor: inbound peers seen by our own node that are NOT in the
@@ -89,7 +104,7 @@ def build_census(db_path: str, generated_ts: int, fork_tip: Optional[int] = None
         {
             "ip": r["ip"], "port": r["port"],
             "subversion": r["subversion"],
-            "height": r["start_height"],
+            "height": node_height(r),
             "cc": r["country_code"], "country": r["country"], "city": r["city"],
             "lat": r["latitude"], "lon": r["longitude"],
             "asn_org": r["asn_org"],

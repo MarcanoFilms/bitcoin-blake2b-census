@@ -197,7 +197,7 @@ function render(d){
       <div class="hint">geographic distribution</div></div>
     <div class="card stat"><div class="label">Height</div>
       <div class="val" style="font-size:1.7rem">${fmt(d.fork_tip)}</div>
-      <div class="hint">${fmt(d.heights.tip)} at tip · ${fmt(d.heights.behind)} behind</div></div>
+      <div class="hint">${fmt(d.heights.tip)} at tip · ${fmt(d.heights.behind)} behind${d.heights.unknown?' · '+fmt(d.heights.unknown)+' unknown':''}</div></div>
   </div>
 
   <div class="grid" style="margin-top:16px">

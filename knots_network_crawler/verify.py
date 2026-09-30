@@ -1,20 +1,29 @@
 """
-Phase 2 — focused BLAKE2b chain verification.
+Phase 2 — focused BLAKE2b membership + chain-verified height.
 
-The discovery crawl (phase 1) finds nodes and their version/height/services but
-skips the chain check, because its getaddr traffic (large addr dumps) saturates a
-limited uplink and starves the tiny getheaders replies. Here we revisit only the
-candidates (reachable Knots nodes) with dedicated connections that do *just* the
-version handshake + a single getheaders anchor probe — no getaddr — so the
-81-byte header reply is never contended and detection is reliable.
+The discovery crawl (phase 1) finds nodes and their self-declared version/height,
+but skips the chain check because its getaddr traffic saturates a limited uplink.
+Here we revisit only the candidates (reachable Knots nodes) with dedicated
+connections that do just the version handshake and one or two tiny getheaders
+probes — no getaddr — so replies are never contended and results are reliable.
 
-A node is on the chain iff, asked for headers with the activation block as
-locator, it replies with a header whose prev_block equals that locator.
+Two things are verified per node, in the same connection:
+
+1. Membership: getheaders with the activation block as locator; a node on the
+   chain replies with a header whose prev_block equals that locator.
+
+2. Height (Kilombino's method): getheaders with locators [tip-10, tip-100,
+   tip-1000, anchor] and hash_stop = our tip, where our tip is sampled once at the
+   start of the pass so every node is measured against the same reference. The
+   node's height is (height of the locator it recognized) + (number of headers it
+   returned). If the last returned header equals our tip header byte-for-byte the
+   node is exactly at tip; comparing raw header bytes avoids the SHA256d-vs-BLAKE2b
+   block-id question. A >20 KB reply means it's far behind (we stop, not download).
 """
 from __future__ import annotations
 
 import asyncio
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from .config import CrawlerConfig
 from .database import Database
@@ -28,51 +37,81 @@ from .protocol import (
     hash_display_to_internal,
     make_version_message,
     parse_headers_first_prevblock,
+    parse_headers_summary,
     read_message,
 )
 
+MAX_HEADERS_PAYLOAD = 20_000  # bytes; larger reply => far behind, don't parse
 
-async def probe_fork(ip: str, port: int, locator: bytes, stop: bytes,
-                     connect_timeout: float = 10.0, read_timeout: float = 12.0) -> bool:
-    """Return True iff the peer is on the BLAKE2b chain."""
+
+async def _read_until_headers(reader, read_timeout: float, budget: float) -> Optional[bytes]:
+    deadline = asyncio.get_event_loop().time() + budget
+    while asyncio.get_event_loop().time() < deadline:
+        cmd, payload = await asyncio.wait_for(read_message(reader, timeout=read_timeout), timeout=read_timeout)
+        if cmd == CMD_HEADERS:
+            return payload
+    return None
+
+
+async def probe_node(ip: str, port: int, anchor: bytes, anchor_stop: bytes,
+                     tip_height: Optional[int], tip_header: Optional[bytes], tip_stop: bytes,
+                     height_locators: List[Tuple[bytes, int]], header_size: int = 80,
+                     connect_timeout: float = 10.0, read_timeout: float = 12.0
+                     ) -> Tuple[bool, Optional[int]]:
+    """Return (is_member, verified_height). verified_height is None if unknown."""
     try:
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(ip, port), timeout=connect_timeout)
+        reader, writer = await asyncio.wait_for(asyncio.open_connection(ip, port), timeout=connect_timeout)
     except Exception:
-        return False
+        return False, None
     try:
         writer.write(make_version_message(addr_recv_ip=ip, addr_recv_port=port, start_height=0))
         await writer.drain()
-
-        # handshake: reply verack to their version, wait for their verack
         deadline = asyncio.get_event_loop().time() + 20.0
         got_version = got_verack = False
         while asyncio.get_event_loop().time() < deadline and not (got_version and got_verack):
             try:
                 cmd, _ = await asyncio.wait_for(read_message(reader, timeout=read_timeout), timeout=read_timeout)
             except (asyncio.TimeoutError, BitcoinProtocolError):
-                return False
+                return False, None
             if cmd == CMD_VERSION:
                 got_version = True
                 writer.write(build_verack()); await writer.drain()
             elif cmd == CMD_VERACK:
                 got_verack = True
         if not got_version:
-            return False
+            return False, None
 
-        # single-header anchor probe
-        writer.write(build_getheaders([locator], hash_stop=stop)); await writer.drain()
-        hdr_deadline = asyncio.get_event_loop().time() + 20.0
-        while asyncio.get_event_loop().time() < hdr_deadline:
+        # 1. membership
+        writer.write(build_getheaders([anchor], hash_stop=anchor_stop)); await writer.drain()
+        try:
+            payload = await _read_until_headers(reader, read_timeout, 20.0)
+        except (asyncio.TimeoutError, BitcoinProtocolError):
+            return False, None
+        if payload is None or parse_headers_first_prevblock(payload) != anchor:
+            return False, None
+
+        # 2. chain-verified height (best-effort; membership already confirmed)
+        verified_height: Optional[int] = None
+        if height_locators and tip_height:
+            writer.write(build_getheaders([h for h, _ in height_locators], hash_stop=tip_stop))
+            await writer.drain()
             try:
-                cmd, payload = await asyncio.wait_for(read_message(reader, timeout=read_timeout), timeout=read_timeout)
+                hpayload = await _read_until_headers(reader, read_timeout, 20.0)
             except (asyncio.TimeoutError, BitcoinProtocolError):
-                return False
-            if cmd == CMD_HEADERS:
-                return parse_headers_first_prevblock(payload) == locator
-        return False
+                hpayload = None
+            if hpayload is not None:
+                if len(hpayload) > MAX_HEADERS_PAYLOAD:
+                    verified_height = max(0, tip_height - 2000)  # far behind
+                else:
+                    count, first_prev, last_header = parse_headers_summary(hpayload, header_size)
+                    loc_height = next((ht for hh, ht in height_locators if hh == first_prev), None)
+                    if loc_height is not None:
+                        verified_height = min(tip_height, loc_height + count)
+                        if tip_header is not None and last_header == tip_header:
+                            verified_height = tip_height
+        return True, verified_height
     except Exception:
-        return False
+        return True, None  # membership may have passed before a late error
     finally:
         try:
             writer.close(); await writer.wait_closed()
@@ -82,20 +121,33 @@ async def probe_fork(ip: str, port: int, locator: bytes, stop: bytes,
 
 async def verify_candidates(db: Database, cfg: CrawlerConfig,
                             candidates: List[Tuple[str, int]],
-                            concurrency: int = 12, progress=None) -> dict:
-    """Probe each candidate for membership and persist is_fork. Returns counts."""
-    locator = hash_display_to_internal(cfg.fork_anchor_hash)
-    stop = hash_display_to_internal(cfg.fork_stop_hash) if cfg.fork_stop_hash else b"\x00" * 32
+                            concurrency: int = 12,
+                            tip_height: Optional[int] = None,
+                            tip_hash: Optional[str] = None,
+                            tip_header: Optional[str] = None,
+                            locators: Optional[List[Tuple[str, int]]] = None,
+                            progress=None) -> dict:
+    """Probe each candidate for membership + chain-verified height; persist results."""
+    anchor = hash_display_to_internal(cfg.fork_anchor_hash)
+    anchor_stop = hash_display_to_internal(cfg.fork_stop_hash) if cfg.fork_stop_hash else b"\x00" * 32
+    tip_header_b = bytes.fromhex(tip_header) if tip_header else None
+    tip_stop_b = hash_display_to_internal(tip_hash) if tip_hash else b"\x00" * 32
+    loc = [(hash_display_to_internal(h), ht) for h, ht in (locators or [])]
+
     sem = asyncio.Semaphore(concurrency)
-    counts = {"checked": 0, "fork": 0}
+    counts = {"checked": 0, "fork": 0, "heights": 0}
 
     async def one(ip: str, port: int):
         async with sem:
-            is_fork = await probe_fork(ip, port, locator, stop)
-            await db.set_fork(ip, port, is_fork)
+            is_member, vheight = await probe_node(
+                ip, port, anchor, anchor_stop, tip_height, tip_header_b, tip_stop_b, loc,
+                header_size=getattr(cfg, "fork_header_size", 80))
+            await db.set_fork(ip, port, is_member, vheight)
             counts["checked"] += 1
-            if is_fork:
+            if is_member:
                 counts["fork"] += 1
+            if vheight is not None:
+                counts["heights"] += 1
             if progress and counts["checked"] % 25 == 0:
                 progress("verify", dict(counts))
 
