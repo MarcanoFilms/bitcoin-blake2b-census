@@ -35,7 +35,7 @@ def build_census(db_path: str, generated_ts: int, fork_tip: Optional[int] = None
                  sensor_peers: Optional[list] = None,
                  fork_headline: str = "8-30 NYPost Deride And Conquer",
                  anchor_height: int = 961640,
-                 interval_seconds: int = 7200, fresh_hours: int = 24) -> dict:
+                 interval_seconds: int = 7200, fresh_hours: int = 72) -> dict:
     """Read the crawler DB and return a census dict ready to serialize."""
     con = sqlite3.connect(db_path)
     con.row_factory = sqlite3.Row
@@ -78,6 +78,16 @@ def build_census(db_path: str, generated_ts: int, fork_tip: Optional[int] = None
     by_country = Counter(r["country_code"] for r in reachable if r["country_code"])
     by_version = Counter(r["subversion"] for r in reachable if r["subversion"])
     by_asn = Counter(r["asn_org"] for r in reachable if r["asn_org"])
+
+    def net_type(ip: str) -> str:
+        ip = ip or ""
+        if ip.endswith(".onion"):
+            return "tor"
+        if ip.endswith(".i2p"):
+            return "i2p"
+        return "ipv6" if ":" in ip else "ipv4"
+
+    by_network = Counter(net_type(r["ip"]) for r in reachable)
 
     # A node is pruned only if it advertises NODE_NETWORK_LIMITED *without*
     # NODE_NETWORK. Modern full nodes set BOTH bits, so keying "pruned" off the
@@ -153,6 +163,7 @@ def build_census(db_path: str, generated_ts: int, fork_tip: Optional[int] = None
         "by_country": dict(by_country.most_common()),
         "by_version": dict(by_version.most_common()),
         "by_asn": dict(by_asn.most_common(15)),
+        "by_network": dict(by_network),
         "countries_count": len(by_country),
         "nodes": nodes_out,
     }
@@ -189,10 +200,27 @@ def write_census(db_path: str, out_path: str, generated_ts: int,
                  fork_tip: Optional[int] = None, sensor_peers: Optional[list] = None,
                  fork_headline: str = "8-30 NYPost Deride And Conquer",
                  anchor_height: int = 961640, interval_seconds: int = 7200,
-                 fresh_hours: int = 24) -> dict:
+                 fresh_hours: int = 72) -> dict:
     data = build_census(db_path, generated_ts, fork_tip, sensor_peers,
                         fork_headline, anchor_height, interval_seconds, fresh_hours)
     with open(out_path, "w") as f:
         json.dump(data, f, separators=(",", ":"))
     append_history(out_path, data)
+    _write_nodes_csv(out_path, data)
     return data
+
+
+def _write_nodes_csv(out_path: str, data: dict) -> None:
+    """Write a nodes.csv of reachable nodes next to out_path (open data export)."""
+    import csv
+    csv_path = os.path.join(os.path.dirname(out_path) or ".", "nodes.csv")
+    fields = ["ip", "port", "cc", "country", "city", "asn_org",
+              "subversion", "height", "pruned", "v2", "latency_ms"]
+    try:
+        with open(csv_path, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+            w.writeheader()
+            for n in data.get("nodes", []):
+                w.writerow(n)
+    except Exception:
+        pass

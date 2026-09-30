@@ -214,6 +214,18 @@ function render(d){
   </div>
 
   <div class="grid cols" style="margin-top:16px">
+    <div class="card"><h2>Network types</h2>
+      <div class="svc">
+        <div class="b"><div class="n" style="color:var(--cyan)">${fmt((d.by_network||{}).ipv4||0)}</div><div class="l">IPv4</div></div>
+        <div class="b"><div class="n" style="color:var(--purple)">${fmt((d.by_network||{}).ipv6||0)}</div><div class="l">IPv6</div></div>
+        <div class="b"><div class="n">${fmt((d.by_network||{}).tor||0)}</div><div class="l">Tor</div></div>
+        <div class="b"><div class="n">${fmt((d.by_network||{}).i2p||0)}</div><div class="l">I2P</div></div>
+      </div>
+    </div>
+    <div class="card"><h2>Reachable over time</h2><div id="trend"><div class="hint">collecting…</div></div></div>
+  </div>
+
+  <div class="grid cols" style="margin-top:16px">
     <div class="card"><h2>Top countries</h2>${bars(d.by_country,10,countryLabel)}</div>
     <div class="card"><h2>Versions</h2>${bars(d.by_version,10,verLabel)}</div>
   </div>
@@ -240,10 +252,40 @@ function render(d){
   document.getElementById('app').innerHTML = html;
 }
 
+function drawTrend(hist){
+  const el = document.getElementById('trend');
+  if(!el) return;
+  if(!Array.isArray(hist) || hist.length < 2){
+    el.innerHTML = '<div class="hint">collecting… (a point per hour; the line appears once there are a few)</div>';
+    return;
+  }
+  const W=680, H=140, pad=28;
+  const xs = hist.map(p=>p.t), ys = hist.map(p=>p.reachable||0);
+  const est = hist.map(p=>p.estimate||0);
+  const x0=Math.min(...xs), x1=Math.max(...xs), ymax=Math.max(...est,...ys,1);
+  const px = t => pad + (x1===x0?0:(t-x0)/(x1-x0))*(W-2*pad);
+  const py = v => H-pad - (v/ymax)*(H-2*pad);
+  const path = arr => arr.map((v,i)=>`${i?'L':'M'}${px(xs[i]).toFixed(1)},${py(v).toFixed(1)}`).join(' ');
+  const last = hist[hist.length-1];
+  el.innerHTML = `
+  <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">
+    <path d="${path(est)}" fill="none" stroke="var(--purple)" stroke-width="1.5" stroke-dasharray="4 3" opacity=".7"/>
+    <path d="${path(ys)}" fill="none" stroke="var(--cyan)" stroke-width="2"/>
+    <text x="${pad}" y="14" fill="var(--text-muted)" font-size="11" font-family="var(--mono)">${ymax} max</text>
+    <text x="${W-pad}" y="${H-8}" fill="var(--text-muted)" font-size="11" font-family="var(--mono)" text-anchor="end">now: ${last.reachable} reachable · ${last.estimate} est</text>
+  </svg>
+  <div class="hint" style="margin-top:6px"><span style="color:var(--cyan)">━</span> reachable &nbsp; <span style="color:var(--purple)">╌</span> total estimate · ${hist.length} points</div>`;
+}
+
+function loadTrend(){
+  fetch(location.protocol==='file:' ? 'history.json' : 'history.json?t='+Date.now())
+    .then(r=>r.ok?r.json():[]).then(drawTrend).catch(()=>{});
+}
+
 function load(){
   fetch(location.protocol==='file:' ? 'data.json' : 'data.json?t='+Date.now())
     .then(r=>{if(!r.ok)throw new Error('data.json '+r.status);return r.json()})
-    .then(render)
+    .then(d=>{render(d); loadTrend();})
     .catch(e=>{document.getElementById('app').innerHTML='<div class="card err">Couldn\'t load data.json: '+e.message+'</div>'});
 }
 load();
