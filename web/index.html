@@ -43,7 +43,9 @@ h1 .b2b{background:linear-gradient(90deg,var(--cyan),var(--purple));-webkit-back
 .grid{display:grid;gap:16px;margin-top:26px}
 .stats{grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
 .card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);
-  padding:20px 22px;backdrop-filter:blur(8px);position:relative;overflow:hidden}
+  padding:20px 22px;backdrop-filter:blur(8px);position:relative;overflow:hidden;
+  transition:border-color .25s ease, transform .25s ease, box-shadow .25s ease}
+.card:hover{border-color:var(--border-glow);box-shadow:0 6px 30px rgba(0,0,0,.35)}
 .card::before{content:"";position:absolute;inset:0 0 auto 0;height:1px;
   background:linear-gradient(90deg,transparent,var(--border-glow),transparent)}
 .stat .label{font-family:var(--mono);font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:var(--text-2)}
@@ -56,11 +58,15 @@ h1 .b2b{background:linear-gradient(90deg,var(--cyan),var(--purple));-webkit-back
 .card h2{font-size:.8rem;font-family:var(--mono);letter-spacing:.1em;text-transform:uppercase;
   color:var(--text-2);margin-bottom:16px;display:flex;align-items:center;gap:8px}
 .card h2::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--cyan);box-shadow:0 0 8px var(--cyan)}
-.bar{display:flex;align-items:center;gap:10px;margin:9px 0;font-size:.88rem}
-.bar .name{width:130px;flex-shrink:0;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.bar .track{flex:1;height:8px;background:rgba(255,255,255,.05);border-radius:99px;overflow:hidden}
-.bar .fill{height:100%;background:linear-gradient(90deg,var(--cyan),var(--purple));border-radius:99px}
-.bar .n{width:42px;text-align:right;font-family:var(--mono);color:var(--text-2);font-size:.82rem}
+.bar{display:flex;align-items:center;gap:14px;margin:0;padding:7px 0;font-size:.86rem;border-bottom:1px solid rgba(255,255,255,.035)}
+.bar:last-child{border-bottom:none}
+.bar .name{flex:0 0 150px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar .barwrap{flex:1;display:flex;align-items:center;min-width:0}
+.bar .fill{height:8px;min-width:8px;border-radius:99px;
+  background:linear-gradient(90deg,var(--cyan),var(--purple));
+  box-shadow:0 0 10px rgba(0,240,255,.28);transition:width .5s ease}
+.bar .n{flex:0 0 32px;text-align:right;font-family:var(--mono);color:var(--text);font-size:.85rem;font-weight:600}
+@media(max-width:560px){.bar .name{flex-basis:110px}}
 .svc{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px}
 .svc .b{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;padding:14px}
 .svc .b .n{font-size:1.5rem;font-weight:700;font-family:var(--mono)}
@@ -72,6 +78,7 @@ td{padding:9px 10px;border-bottom:1px solid rgba(255,255,255,.03);color:var(--te
 td.ip{font-family:var(--mono);color:var(--text)}
 .tag{font-family:var(--mono);font-size:.68rem;padding:1px 7px;border-radius:6px;border:1px solid var(--border)}
 .tag.v2{color:var(--green);border-color:rgba(0,255,170,.3)}
+.tag.legacy{color:var(--text-2);border-color:rgba(148,163,184,.3)}
 .tag.pruned{color:var(--orange);border-color:rgba(255,176,0,.3)}
 .tbl-wrap{max-height:420px;overflow:auto}
 footer{margin-top:34px;text-align:center;color:var(--text-muted);font-size:.8rem;line-height:1.7}
@@ -148,16 +155,22 @@ function tickRefresh(){
 }
 setInterval(tickRefresh, 1000);
 
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
 function bars(obj, max, label=x=>x){
   const entries = Object.entries(obj||{}).slice(0,max);
   const top = entries.length ? entries[0][1] : 1;
   return entries.map(([k,v])=>`
     <div class="bar">
-      <span class="name">${label(k)}</span>
-      <span class="track"><span class="fill" style="width:${Math.max(4,v/top*100)}%"></span></span>
+      <span class="name" title="${esc(k)}">${esc(label(k))}</span>
+      <span class="barwrap"><span class="fill" style="width:${Math.max(6, v/top*100)}%"></span></span>
       <span class="n">${fmt(v)}</span>
     </div>`).join('') || '<div class="hint">no data</div>';
 }
+
+// Version strings are long (/Satoshi:29.4.2/Knots:20260508/) — strip the wrapping
+// slashes and the redundant Satoshi prefix for a readable label; full text on hover.
+const verLabel = s => String(s).replace(/^\/|\/$/g,'').replace(/^Satoshi:/,'');
 
 function render(d){
   _gen = d.generated; _interval = d.interval_seconds || 7200;
@@ -202,7 +215,7 @@ function render(d){
 
   <div class="grid cols" style="margin-top:16px">
     <div class="card"><h2>Top countries</h2>${bars(d.by_country,10,countryLabel)}</div>
-    <div class="card"><h2>Versions</h2>${bars(d.by_version,10)}</div>
+    <div class="card"><h2>Versions</h2>${bars(d.by_version,10,verLabel)}</div>
   </div>
 
   <div class="grid" style="margin-top:16px">
@@ -219,7 +232,7 @@ function render(d){
           <td>${CC(n.cc)} ${n.city||n.country||''}</td>
           <td style="font-family:var(--mono);font-size:.78rem">${(n.subversion||'').replace(/^\/|\/$/g,'')}</td>
           <td style="font-family:var(--mono)">${fmt(n.height)}</td>
-          <td>${n.v2?'<span class="tag v2">v2</span> ':''}${n.pruned?'<span class="tag pruned">pruned</span>':''}</td></tr>
+          <td>${!n.v2?'<span class="tag legacy">v1</span> ':''}${n.pruned?'<span class="tag pruned">pruned</span>':''}</td></tr>
         `).join('')}</tbody>
       </table></div>
     </div>
