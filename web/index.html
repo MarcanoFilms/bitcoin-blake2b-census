@@ -110,7 +110,7 @@ footer a{color:var(--cyan);text-decoration:none}
   <div id="app"></div>
 
   <footer>
-    Sovereign crawler · fork membership verified against activation anchor <span id="anchor" style="font-family:var(--mono)"></span> · updated <span id="upd">—</span><br>
+    Sovereign crawler · BLAKE2b membership verified against activation anchor <span id="anchor" style="font-family:var(--mono)"></span> · updated <span id="upd">—</span><br>
     Figures cover <b>reachable</b> nodes (accept inbound) — a floor on the real network.
     The estimate includes non-listening nodes seen by our own node.<br>
     <!-- TODO: point the name to marcanotrades.com once that site is live; keep the X link. -->
@@ -173,7 +173,7 @@ function render(d){
   <div class="grid stats">
     <div class="card stat"><div class="label">Reachable nodes</div>
       <div class="val cyan">${fmt(d.fork_reachable)}</div>
-      <div class="hint">fork, chain-verified</div></div>
+      <div class="hint">BLAKE2b, chain-verified</div></div>
     <div class="card stat"><div class="label">Total estimate</div>
       <div class="val purple">${fmt(d.total_estimate)}</div>
       <div class="hint">+${fmt(d.non_listening_seen)} non-listening seen</div></div>
