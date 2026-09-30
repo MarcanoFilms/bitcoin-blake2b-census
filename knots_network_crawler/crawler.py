@@ -144,9 +144,17 @@ class KnotsNetworkCrawler:
 
     async def _resolve_dns_seed(self, hostname: str, default_port: int = 8333) -> List[Tuple[str, int]]:
         out: List[Tuple[str, int]] = []
+        # Honor an explicit host:port (e.g. a node on a non-standard port). Only
+        # split when there's a single colon and the suffix is a port number, so
+        # bare IPv6 addresses (many colons) are left intact.
+        port = default_port
+        if hostname.count(":") == 1:
+            host_part, _, port_part = hostname.rpartition(":")
+            if port_part.isdigit():
+                hostname, port = host_part, int(port_part)
         try:
             infos = await asyncio.get_event_loop().getaddrinfo(
-                hostname, default_port, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM
+                hostname, port, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM
             )
             for family, _, _, _, sockaddr in infos:
                 if family == socket.AF_INET:
@@ -161,7 +169,7 @@ class KnotsNetworkCrawler:
                         continue
                 except Exception:
                     continue
-                out.append((ip, default_port))
+                out.append((ip, port))
                 if len(out) > 12:  # don't explode from one seed
                     break
         except Exception as e:

@@ -30,7 +30,10 @@ SEEDS=$($CLI getpeerinfo 2>/dev/null \
 ADDRMAN=$($CLI getnodeaddresses 800 2>/dev/null \
   | "$PY" -c "$IPV4_FILTER"$'\nips=[x.get("address","") for x in json.load(sys.stdin)]\nprint(" ".join("--seed "+ip for ip in ips if f.match(ip)))' \
   || true)
-SEEDS="$SEEDS $ADDRMAN"
+# Extra known-good nodes contributed by the community (host:port honored, so
+# nodes on non-standard ports are reached too).
+EXTRA_SEEDS="--seed nodoblake2b.airdns.org:11010"
+SEEDS="$SEEDS $ADDRMAN $EXTRA_SEEDS"
 
 # --- Phase 1: discovery crawl (no per-peer fork check → fast, broad) ---
 # Hard wall-clock cap with `timeout`: the crawl's internal --duration doesn't
