@@ -75,17 +75,22 @@ def build_census(db_path: str, generated_ts: int, fork_tip: Optional[int] = None
         "v2_transport": sum(1 for r in reachable if _svc(r["services"], NODE_P2P_V2)),
     }
 
-    # Partition ALL reachable nodes so tip + behind + unknown == reachable count.
-    # Tolerance absorbs crawl-duration drift: start_height is sampled at connect
-    # time, and a pass spans several minutes during which new blocks are mined,
-    # so nodes contacted early look a few blocks behind even when fully synced.
-    TIP_TOLERANCE = 6
-    at_tip = sum(1 for h in heights if tip and (tip - h) <= TIP_TOLERANCE)
-    with_height = len(heights)
+    # Height buckets are based ONLY on chain-verified height (measured against one
+    # reference tip in the verify phase). Self-declared start_height is NOT used
+    # here: it drifts with crawl duration and can be spoofed, which would falsely
+    # show synced nodes as "behind". A node we couldn't chain-verify this pass
+    # (e.g. a timeout under a congested uplink) is "unknown", not "behind" — an
+    # honest gap rather than a wrong claim. tip + behind + unknown == reachable.
+    def verified_h(r):
+        return r["verified_height"] if ("verified_height" in r.keys() and r["verified_height"]) else None
+
+    TIP_TOLERANCE = 2  # verified heights are exact; small slack for propagation
+    n_verified = sum(1 for r in reachable if verified_h(r))
+    at_tip = sum(1 for r in reachable if verified_h(r) and tip and (tip - verified_h(r)) <= TIP_TOLERANCE)
     height_buckets = {
         "tip": at_tip,
-        "behind": with_height - at_tip,          # has a height but below tip - tolerance
-        "unknown": len(reachable) - with_height,  # advertised no start height
+        "behind": n_verified - at_tip,
+        "unknown": len(reachable) - n_verified,  # not chain-verified this pass
     }
 
     # Passive sensor: inbound peers seen by our own node that are NOT in the
