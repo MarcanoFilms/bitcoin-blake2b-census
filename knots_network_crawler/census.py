@@ -53,10 +53,15 @@ def build_census(db_path: str, generated_ts: int, fork_tip: Optional[int] = None
     by_version = Counter(r["subversion"] for r in reachable if r["subversion"])
     by_asn = Counter(r["asn_org"] for r in reachable if r["asn_org"])
 
+    # A node is pruned only if it advertises NODE_NETWORK_LIMITED *without*
+    # NODE_NETWORK. Modern full nodes set BOTH bits, so keying "pruned" off the
+    # limited bit alone mislabels full nodes as pruned.
+    def _pruned(services) -> bool:
+        return _svc(services, NODE_NETWORK_LIMITED) and not _svc(services, NODE_NETWORK)
+
     services = {
-        "full": sum(1 for r in reachable if _svc(r["services"], NODE_NETWORK)
-                    and not _svc(r["services"], NODE_NETWORK_LIMITED)),
-        "pruned": sum(1 for r in reachable if _svc(r["services"], NODE_NETWORK_LIMITED)),
+        "full": sum(1 for r in reachable if _svc(r["services"], NODE_NETWORK)),
+        "pruned": sum(1 for r in reachable if _pruned(r["services"])),
         "witness": sum(1 for r in reachable if _svc(r["services"], NODE_WITNESS)),
         "compact_filters": sum(1 for r in reachable if _svc(r["services"], NODE_COMPACT_FILTERS)),
         "v2_transport": sum(1 for r in reachable if _svc(r["services"], NODE_P2P_V2)),
@@ -88,7 +93,7 @@ def build_census(db_path: str, generated_ts: int, fork_tip: Optional[int] = None
             "cc": r["country_code"], "country": r["country"], "city": r["city"],
             "lat": r["latitude"], "lon": r["longitude"],
             "asn_org": r["asn_org"],
-            "pruned": _svc(r["services"], NODE_NETWORK_LIMITED),
+            "pruned": _pruned(r["services"]),
             "v2": _svc(r["services"], NODE_P2P_V2),
             "latency_ms": r["latency_ms"],
         }

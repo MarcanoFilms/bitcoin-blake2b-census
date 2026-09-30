@@ -67,6 +67,7 @@ def cmd_crawl(
     geoip_asn: Optional[Path] = typer.Option(None, "--geo-asn", help="Path to GeoLite2-ASN.mmdb"),
     only_known: bool = typer.Option(False, "--only-known", help="Do not discover new nodes, only refresh existing"),
     seeds: Optional[List[str]] = typer.Option(None, "--seed", help="Additional bootstrap seeds (ip:port or hostname)"),
+    no_fork_detect: bool = typer.Option(False, "--no-fork-detect", help="Skip per-peer BLAKE2b fork check (fast discovery phase; verify separately)"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompts"),
 ) -> None:
     """Run a crawl against the Bitcoin mainnet P2P network."""
@@ -83,6 +84,8 @@ def cmd_crawl(
         verbose=False,
         extra_seeds=seeds,
     )
+    if no_fork_detect:
+        cfg.fork_detect = False
 
     console.print(Panel.fit(
         f"[yellow]Mode:[/yellow] {cfg.mode.upper()}   "
@@ -233,6 +236,28 @@ def cmd_export(
         console.print(f"[yellow]Exported {len(nodes)} nodes to[/yellow] {output}")
 
     asyncio.run(_do_export())
+
+
+@app.command("verify")
+def cmd_verify(
+    db: Optional[Path] = typer.Option(None, "--db"),
+    concurrency: int = typer.Option(12, "--concurrency", "-c", help="Parallel fork probes"),
+    limit: int = typer.Option(20000, "--limit", help="Max candidates to verify"),
+) -> None:
+    """Phase 2: verify BLAKE2b fork membership for reachable Knots candidates
+    (version + single getheaders probe only, no getaddr)."""
+    cfg = load_config(db_path=str(db) if db else None)
+    d = _get_db(cfg.db_path)
+    from .verify import verify_candidates
+
+    async def _run():
+        await d.connect()
+        candidates = await d.get_fork_candidates(limit)
+        console.print(f"[yellow]Verifying[/yellow] {len(candidates)} candidates at concurrency {concurrency}…")
+        counts = await verify_candidates(d, cfg, candidates, concurrency=concurrency)
+        console.print(f"[green]Done:[/green] {counts['fork']} fork / {counts['checked']} checked")
+
+    asyncio.run(_run())
 
 
 @app.command("info")

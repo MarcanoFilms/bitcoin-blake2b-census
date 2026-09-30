@@ -279,6 +279,27 @@ class Database:
             rows = await cur.fetchall()
             return [self._row_to_node(r) for r in rows]
 
+    async def get_fork_candidates(self, limit: int = 20000) -> List[tuple]:
+        """Reachable nodes that could be on the fork (Knots user agent, at or
+        past the activation height). Returns (ip, port) for a focused verify pass."""
+        if not self._conn:
+            await self.connect()
+        async with self._conn.execute(
+            "SELECT ip, port FROM nodes WHERE services_listening=1 AND is_knots=1 "
+            "ORDER BY last_seen DESC LIMIT ?",
+            (limit,),
+        ) as cur:
+            return [(r["ip"], r["port"]) for r in await cur.fetchall()]
+
+    async def set_fork(self, ip: str, port: int, is_fork: bool) -> None:
+        if not self._conn:
+            await self.connect()
+        await self._conn.execute(
+            "UPDATE nodes SET is_fork = ? WHERE ip = ? AND port = ?",
+            (1 if is_fork else 0, ip, port),
+        )
+        await self._conn.commit()
+
     async def get_listening_nodes(self, limit: int = 500) -> List[Node]:
         if not self._conn:
             await self.connect()

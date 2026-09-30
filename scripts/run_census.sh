@@ -28,11 +28,16 @@ ADDRMAN=$($CLI getnodeaddresses 400 2>/dev/null \
   || true)
 SEEDS="$SEEDS $ADDRMAN"
 
-# --- crawl (persistent DB accumulates across runs) ---
+# --- Phase 1: discovery crawl (no per-peer fork check → fast, broad) ---
 # shellcheck disable=SC2086
 "$PY" -m knots_network_crawler crawl \
   --mode normal --concurrency "$CONCURRENCY" --duration "$DURATION" \
-  --max-nodes 6000 --yes --db "$DB" $SEEDS >/dev/null 2>&1 || true
+  --max-nodes 20000 --no-fork-detect --yes --db "$DB" $SEEDS >/dev/null 2>&1 || true
+
+# --- Phase 2: verify fork membership for reachable Knots candidates ---
+# Dedicated version+getheaders probes, no getaddr contention → reliable.
+"$PY" -m knots_network_crawler verify \
+  --db "$DB" --concurrency "${CENSUS_VERIFY_CONCURRENCY:-12}" >/dev/null 2>&1 || true
 
 # --- fork tip + passive sensor (inbound peers = non-listening candidates) ---
 FORK_TIP=$($CLI getblockcount 2>/dev/null || echo 0)
