@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "knots-network-crawler"
+version = "0.1.0"
+description = "Powerful, sovereign Bitcoin network crawler focused on Knots nodes and reachable (listening) peers. Real P2P crawling + rich GeoIP + terminal analysis."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+  {name = "Sovereign Bitcoin Tools"}
+]
+dependencies = [
+  "rich>=13.7",
+  "typer[all]>=0.9.0",
+  "maxminddb>=2.6.0",
+  "python-dotenv>=1.0.0",
+  "aiosqlite>=0.20.0",
+]
+
+[project.optional-dependencies]
+dev = ["ruff", "mypy", "pytest"]
+
+[project.scripts]
+knots-network-crawler = "knots_network_crawler.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["knots_network_crawler"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+ignore_missing_imports = true
