@@ -133,9 +133,13 @@ def build_census(db_path: str, generated_ts: int, fork_tip: Optional[int] = None
                 seen.add(ip)
         non_listening = len(seen)
 
+    def _keys(r):
+        return r.keys()
+
     nodes_out = [
         {
             "ip": r["ip"], "port": r["port"],
+            "net": net_type(r["ip"]),
             "subversion": r["subversion"],
             "height": node_height(r),
             "cc": r["country_code"], "country": r["country"], "city": r["city"],
@@ -144,6 +148,9 @@ def build_census(db_path: str, generated_ts: int, fork_tip: Optional[int] = None
             "pruned": _pruned(r["services"]),
             "v2": _svc(r["services"], NODE_P2P_V2),
             "latency_ms": r["latency_ms"],
+            "first_seen": r["first_seen"] if "first_seen" in _keys(r) else None,
+            "last_seen": r["last_seen"] if "last_seen" in _keys(r) else None,
+            "crawls": r["crawl_count"] if "crawl_count" in _keys(r) else None,
         }
         for r in reachable
     ]

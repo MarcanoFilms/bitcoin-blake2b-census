@@ -81,6 +81,19 @@ td.ip{font-family:var(--mono);color:var(--text)}
 .tag.legacy{color:var(--text-2);border-color:rgba(148,163,184,.3)}
 .tag.pruned{color:var(--orange);border-color:rgba(255,176,0,.3)}
 .tbl-wrap{max-height:420px;overflow:auto}
+.expq{width:100%;margin-bottom:12px;padding:9px 12px;border-radius:8px;font-family:var(--mono);font-size:.82rem;
+  background:rgba(255,255,255,.03);border:1px solid var(--border);color:var(--text);outline:none}
+.expq:focus{border-color:var(--border-glow)}
+th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
+th.sortable:hover{color:var(--cyan)}
+th .arr{color:var(--cyan)}
+.pager{display:flex;align-items:center;justify-content:space-between;margin-top:12px;font-family:var(--mono);font-size:.78rem;color:var(--text-2)}
+.pager button{background:rgba(255,255,255,.05);border:1px solid var(--border);color:var(--text);
+  border-radius:7px;padding:5px 12px;cursor:pointer;font-family:var(--mono);font-size:.78rem}
+.pager button:disabled{opacity:.35;cursor:default}
+.pager button:not(:disabled):hover{border-color:var(--border-glow);color:var(--cyan)}
+.netdot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:middle}
+.map-wrap{position:relative;width:100%;background:rgba(0,240,255,.02);border:1px solid var(--border);border-radius:10px;overflow:hidden}
 footer{margin-top:34px;text-align:center;color:var(--text-muted);font-size:.8rem;line-height:1.7}
 footer a{color:var(--cyan);text-decoration:none}
 .err{color:var(--red);font-family:var(--mono);padding:20px}
@@ -235,21 +248,20 @@ function render(d){
   </div>
 
   <div class="grid" style="margin-top:16px">
+    <div class="card"><h2>Node map</h2><div id="nodemap"></div></div>
+  </div>
+
+  <div class="grid" style="margin-top:16px">
     <div class="card">
-      <h2>Reachable nodes (${fmt(d.nodes.length)})</h2>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th>IP</th><th>Country</th><th>Version</th><th>Height</th><th>Flags</th></tr></thead>
-        <tbody>${d.nodes.map(n=>`
-          <tr><td class="ip">${n.ip}</td>
-          <td>${CC(n.cc)} ${n.city||n.country||''}</td>
-          <td style="font-family:var(--mono);font-size:.78rem">${(n.subversion||'').replace(/^\/|\/$/g,'')}</td>
-          <td style="font-family:var(--mono)">${fmt(n.height)}</td>
-          <td>${!n.v2?'<span class="tag legacy">v1</span> ':''}${n.pruned?'<span class="tag pruned">pruned</span>':''}</td></tr>
-        `).join('')}</tbody>
-      </table></div>
+      <h2>Node explorer</h2>
+      <input id="expq" class="expq" type="search" placeholder="filter by IP, country, city, version, ASN…" oninput="expState.q=this.value;expState.page=0;renderExplorer()">
+      <div id="explorer"></div>
     </div>
   </div>`;
   document.getElementById('app').innerHTML = html;
+  _nodes = d.nodes || [];
+  drawMap(_nodes);
+  renderExplorer();
 }
 
 function drawTrend(hist){
@@ -280,6 +292,69 @@ function drawTrend(hist){
 function loadTrend(){
   fetch(location.protocol==='file:' ? 'history.json' : 'history.json?t='+Date.now())
     .then(r=>r.ok?r.json():[]).then(drawTrend).catch(()=>{});
+}
+
+// ---- Node map (equirectangular projection + graticule) ----
+function drawMap(nodes){
+  const el = document.getElementById('nodemap');
+  if(!el) return;
+  const geo = (nodes||[]).filter(n=>typeof n.lat==='number' && typeof n.lon==='number');
+  const W=1000, H=500;
+  const px = lon => (lon+180)/360*W;
+  const py = lat => (90-lat)/180*H;
+  const grat = [];
+  for(let lon=-150;lon<=150;lon+=30) grat.push(`<line x1="${px(lon)}" y1="0" x2="${px(lon)}" y2="${H}"/>`);
+  for(let lat=-60;lat<=60;lat+=30) grat.push(`<line x1="0" y1="${py(lat)}" x2="${W}" y2="${py(lat)}"/>`);
+  const netColor = n => n.net==='tor'?'#ffb000':n.net==='i2p'?'#bd5eff':n.net==='ipv6'?'#00ffaa':'#00f0ff';
+  const dots = geo.map(n=>`<circle cx="${px(n.lon).toFixed(1)}" cy="${py(n.lat).toFixed(1)}" r="4"
+     fill="${netColor(n)}" fill-opacity=".75"><title>${(n.city||n.country||'')} · ${n.ip}</title></circle>`).join('');
+  el.innerHTML = `<div class="map-wrap"><svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block">
+    <g stroke="rgba(255,255,255,.05)" stroke-width="1">${grat.join('')}</g>
+    <line x1="0" y1="${py(0)}" x2="${W}" y2="${py(0)}" stroke="rgba(255,255,255,.09)"/>
+    ${dots}</svg></div>
+    <div class="hint" style="margin-top:8px">${geo.length} geolocated · dot colour = network (cyan IPv4 · green IPv6 · amber Tor · purple I2P)</div>`;
+}
+
+// ---- Node explorer (filter + sort + paginate) ----
+var _nodes = [];
+var expState = {sort:'latency_ms', dir:1, q:'', page:0, per:25};
+function agoShort(iso){
+  if(!iso) return '—';
+  try{ const s=(Date.now()-new Date(iso).getTime())/1000;
+    if(s<3600) return Math.round(s/60)+'m'; if(s<86400) return Math.round(s/3600)+'h'; return Math.round(s/86400)+'d';
+  }catch(e){return '—'}
+}
+function expSort(k){ if(expState.sort===k) expState.dir*=-1; else {expState.sort=k;expState.dir=1;} expState.page=0; renderExplorer(); }
+function expPage(d){ expState.page+=d; renderExplorer(); }
+function renderExplorer(){
+  const el=document.getElementById('explorer'); if(!el) return;
+  const q=expState.q.trim().toLowerCase();
+  let rows=_nodes.filter(n=>!q || [n.ip,n.country,n.city,n.subversion,n.asn_org,n.net].some(v=>(v||'').toString().toLowerCase().includes(q)));
+  const k=expState.sort, dir=expState.dir;
+  rows=rows.slice().sort((a,b)=>{let x=a[k],y=b[k];
+    if(x==null)return 1; if(y==null)return -1;
+    if(typeof x==='string')return dir*x.localeCompare(y); return dir*((x>y)-(x<y));});
+  const total=rows.length, per=expState.per, pages=Math.max(1,Math.ceil(total/per));
+  if(expState.page>=pages) expState.page=pages-1; if(expState.page<0) expState.page=0;
+  const page=rows.slice(expState.page*per,(expState.page+1)*per);
+  const arr=k2=>k===k2?`<span class="arr">${dir>0?'▲':'▼'}</span>`:'';
+  const th=(k2,lbl,st='')=>`<th class="sortable" style="${st}" onclick="expSort('${k2}')">${lbl}${arr(k2)}</th>`;
+  el.innerHTML=`<div class="tbl-wrap"><table>
+    <thead><tr>${th('net','NET')}${th('ip','IP')}${th('country','COUNTRY')}${th('subversion','VERSION')}${th('height','HEIGHT')}${th('latency_ms','LAT ms')}${th('first_seen','SEEN')}<th>FLAGS</th></tr></thead>
+    <tbody>${page.map(n=>`<tr>
+      <td><span class="netdot" style="background:${n.net==='tor'?'#ffb000':n.net==='i2p'?'#bd5eff':n.net==='ipv6'?'#00ffaa':'#00f0ff'}"></span>${n.net}</td>
+      <td class="ip">${esc(n.ip)}</td>
+      <td>${CC(n.cc)} ${esc(n.city||n.country||'')}</td>
+      <td style="font-family:var(--mono);font-size:.76rem" title="${esc(n.subversion||'')}">${esc((n.subversion||'').replace(/^\/|\/$/g,''))}</td>
+      <td style="font-family:var(--mono)">${fmt(n.height)}</td>
+      <td style="font-family:var(--mono)">${n.latency_ms!=null?Math.round(n.latency_ms):'—'}</td>
+      <td title="first seen ${esc(n.first_seen||'')}">${agoShort(n.first_seen)}</td>
+      <td>${!n.v2?'<span class="tag legacy">v1</span> ':''}${n.pruned?'<span class="tag pruned">pruned</span>':''}</td></tr>`).join('')}</tbody>
+    </table></div>
+    <div class="pager"><span>${total} nodes${q?' (filtered)':''}</span>
+      <span><button onclick="expPage(-1)" ${expState.page<=0?'disabled':''}>‹ Prev</button>
+      page ${expState.page+1}/${pages}
+      <button onclick="expPage(1)" ${expState.page>=pages-1?'disabled':''}>Next ›</button></span></div>`;
 }
 
 function load(){
