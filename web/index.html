@@ -305,13 +305,15 @@ function drawMap(nodes){
   const grat = [];
   for(let lon=-150;lon<=150;lon+=30) grat.push(`<line x1="${px(lon)}" y1="0" x2="${px(lon)}" y2="${H}"/>`);
   for(let lat=-60;lat<=60;lat+=30) grat.push(`<line x1="0" y1="${py(lat)}" x2="${W}" y2="${py(lat)}"/>`);
+  const regions=[["N. AMERICA",48,-100],["S. AMERICA",-15,-60],["EUROPE",54,15],["AFRICA",3,20],["ASIA",46,95],["OCEANIA",-25,134]];
+  const labels=regions.map(([t,lat,lon])=>`<text x="${px(lon)}" y="${py(lat)}" fill="rgba(148,163,184,.28)" font-size="15" font-family="var(--mono)" text-anchor="middle" letter-spacing="1">${t}</text>`).join('');
   const netColor = n => n.net==='tor'?'#ffb000':n.net==='i2p'?'#bd5eff':n.net==='ipv6'?'#00ffaa':'#00f0ff';
-  const dots = geo.map(n=>`<circle cx="${px(n.lon).toFixed(1)}" cy="${py(n.lat).toFixed(1)}" r="4"
-     fill="${netColor(n)}" fill-opacity=".75"><title>${(n.city||n.country||'')} · ${n.ip}</title></circle>`).join('');
+  const dots = geo.map(n=>`<circle cx="${px(n.lon).toFixed(1)}" cy="${py(n.lat).toFixed(1)}" r="4.5"
+     fill="${netColor(n)}" fill-opacity=".85" stroke="${netColor(n)}" stroke-opacity=".25" stroke-width="5"><title>${(n.city||n.country||'')} · ${n.ip}</title></circle>`).join('');
   el.innerHTML = `<div class="map-wrap"><svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block">
     <g stroke="rgba(255,255,255,.05)" stroke-width="1">${grat.join('')}</g>
     <line x1="0" y1="${py(0)}" x2="${W}" y2="${py(0)}" stroke="rgba(255,255,255,.09)"/>
-    ${dots}</svg></div>
+    ${labels}${dots}</svg></div>
     <div class="hint" style="margin-top:8px">${geo.length} geolocated · dot colour = network (cyan IPv4 · green IPv6 · amber Tor · purple I2P)</div>`;
 }
 
