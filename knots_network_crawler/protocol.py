@@ -35,6 +35,7 @@ NODE_WITNESS = 1 << 3
 NODE_XTHIN = 1 << 4
 NODE_COMPACT_FILTERS = 1 << 6
 NODE_NETWORK_LIMITED = 1 << 10
+NODE_P2P_V2 = 1 << 11          # BIP324 v2 encrypted transport
 
 # Commands (12 bytes, null padded)
 CMD_VERSION = b"version".ljust(12, b"\x00")
