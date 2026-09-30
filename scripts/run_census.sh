@@ -18,15 +18,17 @@ INTERVAL="${CENSUS_INTERVAL:-3600}"
 cd "$ROOT"
 mkdir -p "$ROOT/data" "$WEB"
 
-# --- seeds ---
-# Outbound peers are listening fork nodes we're actually connected to (reliable),
-# plus a sample of the node's addrman for breadth. Inbound peers are skipped:
-# they connected to us and usually can't be reached back at :8333.
+# --- seeds (IPv4 only) ---
+# Outbound peers are listening nodes we're actually connected to (reliable), plus
+# a sample of the node's addrman for breadth. Inbound peers are skipped (they
+# can't be reached back at :8333). We keep only IPv4 — the crawler has no Tor/I2P
+# transport, so .onion/.i2p (and IPv6) seeds just burn the run's time on timeouts.
+IPV4_FILTER='import sys,json,re; f=re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")'
 SEEDS=$($CLI getpeerinfo 2>/dev/null \
-  | "$PY" -c 'import sys,json; print(" ".join("--seed "+p["addr"].rsplit(":",1)[0] for p in json.load(sys.stdin) if p.get("addr") and not p.get("inbound")))' \
+  | "$PY" -c "$IPV4_FILTER"$'\nips=[p["addr"].rsplit(":",1)[0] for p in json.load(sys.stdin) if p.get("addr") and not p.get("inbound")]\nprint(" ".join("--seed "+ip for ip in ips if f.match(ip)))' \
   || true)
-ADDRMAN=$($CLI getnodeaddresses 400 2>/dev/null \
-  | "$PY" -c 'import sys,json; a=json.load(sys.stdin); print(" ".join("--seed "+x["address"] for x in a if ":" not in x.get("address","")))' \
+ADDRMAN=$($CLI getnodeaddresses 800 2>/dev/null \
+  | "$PY" -c "$IPV4_FILTER"$'\nips=[x.get("address","") for x in json.load(sys.stdin)]\nprint(" ".join("--seed "+ip for ip in ips if f.match(ip)))' \
   || true)
 SEEDS="$SEEDS $ADDRMAN"
 
