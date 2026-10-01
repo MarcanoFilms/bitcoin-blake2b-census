@@ -497,8 +497,15 @@ class KnotsNetworkCrawler:
         ua = (node.subversion or "").lower()
         node.is_knots = "knots" in ua or ".knots" in ua
 
-        # Chain-verified BLAKE2b membership (independent of user agent)
-        node.is_fork = fork_verified
+        # BLAKE2b membership. Two independent signals:
+        #   (a) service bit 28 (NODE_BLAKE2B) — advertised in the version handshake,
+        #       so it costs zero extra round-trips and works even in the broad phase-1
+        #       crawl that runs with --no-fork-detect (no getheaders).
+        #   (b) chain verification — getheaders anchored at the activation block,
+        #       which proves the node is on OUR chain and can't be spoofed by a bit.
+        # Either is sufficient to flag a candidate; phase 2 confirms by chain + height.
+        NODE_BLAKE2B = 1 << 28
+        node.is_fork = fork_verified or bool(services & NODE_BLAKE2B)
 
         # GeoIP
         node.geo = self.geo.lookup(ip)

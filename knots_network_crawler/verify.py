@@ -39,10 +39,12 @@ from .protocol import (
     open_p2p_connection,
     parse_headers_first_prevblock,
     parse_headers_summary,
+    parse_version_payload,
     read_message,
 )
 
 MAX_HEADERS_PAYLOAD = 20_000  # bytes; larger reply => far behind, don't parse
+NODE_BLAKE2B = 1 << 28  # service bit advertised by BLAKE2b nodes (NODE_BLAKE2B)
 
 
 async def _read_until_headers(reader, read_timeout: float, budget: float) -> Optional[bytes]:
@@ -75,37 +77,47 @@ async def probe_node(ip: str, port: int, anchor: bytes, anchor_stop: bytes,
         await writer.drain()
         deadline = asyncio.get_event_loop().time() + 20.0
         got_version = got_verack = False
+        svc_blake2b = False
         while asyncio.get_event_loop().time() < deadline and not (got_version and got_verack):
             try:
-                cmd, _ = await asyncio.wait_for(read_message(reader, timeout=read_timeout), timeout=read_timeout)
+                cmd, payload = await asyncio.wait_for(read_message(reader, timeout=read_timeout), timeout=read_timeout)
             except (asyncio.TimeoutError, BitcoinProtocolError):
                 return "unreachable", None
             if cmd == CMD_VERSION:
                 got_version = True
+                try:
+                    svc_blake2b = bool((parse_version_payload(payload).get("services") or 0) & NODE_BLAKE2B)
+                except Exception:
+                    svc_blake2b = False
                 writer.write(build_verack()); await writer.drain()
             elif cmd == CMD_VERACK:
                 got_verack = True
         if not got_version:
             return "unreachable", None
 
-        # 1. membership — read `headers` messages, IGNORING unsolicited block
-        # announcements. A peer that mines/relays a block mid-probe pushes its own
-        # `headers` (prev_block = recent tip, not our anchor); treating that as the
-        # getheaders reply would falsely mark a good node 'not_member' and drop it.
-        # Only a reply whose first prev_block == our anchor confirms membership;
-        # anything else is left as 'unreachable' (never a downgrade).
-        writer.write(build_getheaders([anchor], hash_stop=anchor_stop)); await writer.drain()
-        member = False
-        hdr_deadline = asyncio.get_event_loop().time() + 20.0
-        while asyncio.get_event_loop().time() < hdr_deadline:
-            try:
-                cmd, payload = await asyncio.wait_for(
-                    read_message(reader, timeout=read_timeout), timeout=read_timeout)
-            except (asyncio.TimeoutError, BitcoinProtocolError):
-                break
-            if cmd == CMD_HEADERS and parse_headers_first_prevblock(payload) == anchor:
-                member = True
-                break
+        # 1. membership. Fast path: the node advertised service bit 28 (NODE_BLAKE2B)
+        # in its version message — membership is already settled with zero extra
+        # round-trips, which is exactly what relieves a congested uplink. Only when
+        # the bit is absent do we fall back to the chain probe below.
+        member = svc_blake2b
+        if not member:
+            # Chain probe — read `headers` messages, IGNORING unsolicited block
+            # announcements. A peer that mines/relays a block mid-probe pushes its own
+            # `headers` (prev_block = recent tip, not our anchor); treating that as the
+            # getheaders reply would falsely mark a good node 'not_member' and drop it.
+            # Only a reply whose first prev_block == our anchor confirms membership;
+            # anything else is left as 'unreachable' (never a downgrade).
+            writer.write(build_getheaders([anchor], hash_stop=anchor_stop)); await writer.drain()
+            hdr_deadline = asyncio.get_event_loop().time() + 20.0
+            while asyncio.get_event_loop().time() < hdr_deadline:
+                try:
+                    cmd, payload = await asyncio.wait_for(
+                        read_message(reader, timeout=read_timeout), timeout=read_timeout)
+                except (asyncio.TimeoutError, BitcoinProtocolError):
+                    break
+                if cmd == CMD_HEADERS and parse_headers_first_prevblock(payload) == anchor:
+                    member = True
+                    break
         if not member:
             return "unreachable", None
 
