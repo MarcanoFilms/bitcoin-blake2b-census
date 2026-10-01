@@ -87,7 +87,7 @@ ACTIVE_HOURS="${CENSUS_ACTIVE_HOURS:-48}" "$PY" - <<'PYEOF'
 import os, json
 from datetime import datetime, timezone
 from knots_network_crawler.census import db_reachable_nodes, write_census
-from knots_network_crawler.registry import update_registry, load_active_nodes, registry_count, prune_db
+from knots_network_crawler.registry import update_registry, load_active_nodes, registry_count, prune_db, write_seeds
 gen = int(os.environ["GEN_TS"])
 reg_csv = os.path.join(os.environ["WEB"], "registry.csv")
 now_iso = datetime.fromtimestamp(gen, timezone.utc).isoformat()
@@ -106,8 +106,12 @@ d = write_census(
     all_time=registry_count(reg_csv),
 )
 pruned = prune_db(os.environ["DB"], gen, keep_days=int(os.environ["REG_KEEP_DAYS"]))
+
+# 3) publish the HTTP seed list (no-VPS equivalent of a DNS seed) from the registry
+seeds = write_seeds(reg_csv, os.environ["WEB"], gen)
 print(f"pass: {len(pass_nodes)} verified this run | dashboard: {d['fork_reachable']} active / {d['countries_count']} countries / tip {d['fork_tip']}")
 print(f"registry: {reg['total']} unique ({reg['new']} new) | pruned {pruned} DB rows")
+print(f"seeds: {seeds['stable']} stable / {seeds['all']} total published")
 PYEOF
 
 # --- keep our node peered with stable, active BLAKE2b nodes from the registry ---

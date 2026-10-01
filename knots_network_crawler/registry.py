@@ -118,6 +118,61 @@ def load_active_nodes(csv_path: str, now_ts: int, active_hours: int = 48) -> Lis
     return out
 
 
+def write_seeds(csv_path: str, out_dir: str, now_ts: int,
+                min_seen: int = 2, max_age_days: int = 7) -> dict:
+    """Generate a public HTTP seed list from the registry — the no-VPS equivalent
+    of a DNS seed. A node/wallet can fetch `seeds.txt` to bootstrap, or a build can
+    hardcode it into chainparams as fixed seeds. Mirrors Lion's seed-stable.py
+    criteria: seen in >= min_seen passes and active within max_age_days => stable.
+
+    Writes two files in out_dir:
+      seeds.txt      — stable clearnet nodes (ipv4/ipv6), one `ip:port` per line,
+                       most-seen (most reliable) first — the primary bootstrap list.
+      seeds-all.txt  — every active node incl. Tor/I2P (reachable via a node's proxies).
+    """
+    import ipaddress
+
+    def _public_clearnet(addr: str) -> bool:
+        try:
+            a = ipaddress.ip_address(addr)
+            return not (a.is_private or a.is_loopback or a.is_link_local)
+        except ValueError:
+            return False  # .onion/.i2p are not clearnet
+
+    stable, allrows = [], []
+    if os.path.exists(csv_path):
+        with open(csv_path, newline="") as f:
+            for r in csv.DictReader(f):
+                try:
+                    seen = int(r.get("times_seen") or 0)
+                    if now_ts - datetime.fromisoformat(r["last_seen"]).timestamp() > max_age_days * 86400:
+                        continue
+                except Exception:
+                    continue
+                addr = r.get("address", "")
+                if not addr:
+                    continue
+                hostport = f"[{addr}]:{r.get('port','8333')}" if ":" in addr and not addr.endswith((".onion", ".i2p")) else f"{addr}:{r.get('port','8333')}"
+                allrows.append((seen, hostport))
+                if seen >= min_seen and _public_clearnet(addr):
+                    stable.append((seen, hostport))
+
+    stable.sort(reverse=True)
+    allrows.sort(reverse=True)
+    os.makedirs(out_dir, exist_ok=True)
+    header = ("# BLAKE2b network seed list — https://census.marcanotrades.com\n"
+              "# stable nodes (seen in >=%d passes, active <=%dd), most-reliable first\n" % (min_seen, max_age_days))
+    for name, rows in (("seeds.txt", stable), ("seeds-all.txt", allrows)):
+        tmp = os.path.join(out_dir, name + ".tmp")
+        with open(tmp, "w") as f:
+            if name == "seeds.txt":
+                f.write(header)
+            f.write("\n".join(hp for _, hp in rows))
+            f.write("\n")
+        os.replace(tmp, os.path.join(out_dir, name))
+    return {"stable": len(stable), "all": len(allrows)}
+
+
 def registry_count(csv_path: str) -> int:
     if not os.path.exists(csv_path):
         return 0
