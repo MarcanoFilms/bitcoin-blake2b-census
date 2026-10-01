@@ -140,6 +140,18 @@ the registry's stable nodes (`scripts/addpeers.sh`).
   non-listening estimate from the passive sensor.
 - Coverage builds up over successive passes, since the Bitcoin-Blake2b network
   lives inside the larger shared P2P network and a single pass samples it.
+- **Counts are of reachable endpoints, not physical machines.** The Bitcoin P2P
+  protocol has no stable node identity — a node exists only as its network
+  address(es), and the `version` nonce only detects self-connections. A
+  **dual-stack** node (one `bitcoind` listening on both IPv4 and IPv6) advertises
+  both addresses and is reachable by both, so it appears as two rows keyed by
+  `(address, port)`. This is intentional and matches how bitnodes, DNS seeders,
+  and Luke Dashjr's counts work: each address is an independent way to reach the
+  node. In a small network a dual-stack node therefore adds +1 to the count.
+  De-duplicating to "unique machines" would require a heuristic (same port + user
+  agent + ASN + height, seen in the same pass), which can't be done reliably from
+  the protocol alone, so the registry keeps the honest, verifiable per-endpoint
+  figure as its primary metric.
 
 ---
 
