@@ -77,4 +77,47 @@ for peer in $PINNED; do
     $CLI addnode "$peer" add >/dev/null 2>&1 || true
     count=$((count + 1))
 done
-echo "addpeers: ensured $count stable BLAKE2b peers (min_seen=$MIN_SEEN, active<=${MAX_AGE_DAYS}d, +pinned)"
+
+# Self-clean: drop addnode entries that have aged out — not currently connected,
+# not pinned, and no longer in the active registry (>MAX_AGE_DAYS since last seen).
+# Comparison is bracket-insensitive: `getaddednodeinfo` returns IPv6 without the
+# [..] that the registry/addnode form carries, so we normalize both sides first
+# (a mismatch here would wrongly drop a live IPv6 node).
+PRUNED=$(REG="$REG" DD="$DATADIR" MAX_AGE_DAYS="$MAX_AGE_DAYS" PINNED="$PINNED" "$PY" - <<'PY'
+import os, csv, json, subprocess
+from datetime import datetime, timezone
+DD = os.environ["DD"]; reg = os.environ["REG"]; maxage = int(os.environ["MAX_AGE_DAYS"])
+norm = lambda s: s.replace("[", "").replace("]", "").strip().lower()
+pinned = {norm(p) for p in os.environ.get("PINNED", "").split()}
+now = datetime.now(timezone.utc).timestamp()
+alive = set()
+try:
+    for r in csv.DictReader(open(reg)):
+        a = r.get("address", ""); p = r.get("port", "8333")
+        try:
+            if now - datetime.fromisoformat(r["last_seen"]).timestamp() > maxage * 86400:
+                continue
+        except Exception:
+            continue
+        if a:
+            alive.add(norm(f"{a}:{p}"))
+except Exception:
+    pass
+try:
+    added = json.loads(subprocess.run(["bitcoin-cli", f"-datadir={DD}", "getaddednodeinfo"],
+                                       capture_output=True, text=True).stdout)
+except Exception:
+    added = []
+pruned = 0
+for x in added:
+    node = x.get("addednode", "")
+    key = norm(node)
+    if x.get("connected") or key in pinned or key in alive:
+        continue
+    if subprocess.run(["bitcoin-cli", f"-datadir={DD}", "addnode", node, "remove"],
+                      capture_output=True, text=True).returncode == 0:
+        pruned += 1
+print(pruned)
+PY
+)
+echo "addpeers: ensured $count stable BLAKE2b peers (min_seen=$MIN_SEEN, active<=${MAX_AGE_DAYS}d, +pinned); pruned ${PRUNED:-0} dead"
