@@ -160,11 +160,15 @@ function tickRefresh(){
   if(!_gen) return;
   const now = Date.now()/1000;
   const ago = now - _gen;
-  // The crawler runs hourly on the hour (local clock), so the next run is the top
-  // of the next hour — not generated+interval (which drifts with pass duration).
+  // The crawler runs on a clock-aligned cadence (interval_seconds, e.g. every 2h
+  // on even hours, local time). Next run = next midnight-based multiple of the
+  // period — robust across the day boundary.
+  const periodMs = Math.max(1, _interval) * 1000;
   const d = new Date();
-  const nextTop = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours()+1, 0, 0, 0);
-  const next = nextTop.getTime()/1000 - now;
+  const midnight = new Date(d); midnight.setHours(0,0,0,0);
+  const sinceMid = d.getTime() - midnight.getTime();
+  const nextMs = midnight.getTime() + Math.ceil((sinceMid + 500) / periodMs) * periodMs;
+  const next = nextMs/1000 - now;
   const el = document.getElementById('refresh');
   el.innerHTML = `updated <b>${humanDur(ago)} ago</b> · next run <b>${humanDur(next)}</b>`;
 }
