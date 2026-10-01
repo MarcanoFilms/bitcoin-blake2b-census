@@ -47,9 +47,23 @@ print("\n".join(p for _, p in rows[:cap]))
 PY
 )
 
-# Pinned peers: always kept, independent of the registry (e.g. community nodes on
-# non-standard ports that a pass may not have crawled yet). Space-separated host:port.
-PINNED="${ADDPEERS_PINNED:-nodoblake2b.airdns.org:11010}"
+# Pinned peers: always kept, independent of the registry (community nodes, incl.
+# non-standard ports and Tor that a pass may not have crawled yet). Space-separated
+# host:port. Curated list shared by Kilombino (our own Macanotrades entries excluded).
+PINNED="${ADDPEERS_PINNED:-\
+179.27.118.130:8343 \
+nodoblake2b.airdns.org:11010 \
+173.24.24.140:8333 \
+47.189.218.206:8435 \
+172.235.154.147:8333 \
+64.181.91.48:8333 \
+84.106.7.182:8333 \
+23.114.198.28:9333 \
+94.59.27.202:9333 \
+64.68.204.49:8333 \
+84.213.189.64:9333 \
+82.67.102.15:8333 \
+w2okrqbcuvkqg75aa6lodlso2rfoxe3c7arlp5kznawxi7wev26skead.onion:8333}"
 
 count=0
 while IFS= read -r peer; do

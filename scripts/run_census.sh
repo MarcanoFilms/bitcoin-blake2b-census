@@ -30,8 +30,13 @@ ADDRMAN=$($CLI getnodeaddresses 0 2>/dev/null \
   | "$PY" -c $'import sys,json,re\nf=re.compile(r"^\\d{1,3}(\\.\\d{1,3}){3}$")\na=json.load(sys.stdin)\nv4=[x["address"] for x in a if f.match(x.get("address",""))][:800]\ntor=[x["address"] for x in a if x.get("address","").endswith(".onion")][:150]\ni2p=[x["address"] for x in a if x.get("address","").endswith(".i2p")][:50]\nprint(" ".join("--seed "+s for s in v4+tor+i2p))' \
   || true)
 # Extra known-good nodes contributed by the community (host:port honored, so
-# nodes on non-standard ports are reached too).
-EXTRA_SEEDS="--seed nodoblake2b.airdns.org:11010"
+# nodes on non-standard ports and Tor are reached too). Curated list from Kilombino.
+EXTRA_SEEDS="--seed 179.27.118.130:8343 --seed nodoblake2b.airdns.org:11010 \
+--seed 173.24.24.140:8333 --seed 47.189.218.206:8435 --seed 172.235.154.147:8333 \
+--seed 64.181.91.48:8333 --seed 84.106.7.182:8333 --seed 23.114.198.28:9333 \
+--seed 94.59.27.202:9333 --seed 64.68.204.49:8333 --seed 84.213.189.64:9333 \
+--seed 82.67.102.15:8333 \
+--seed w2okrqbcuvkqg75aa6lodlso2rfoxe3c7arlp5kznawxi7wev26skead.onion:8333"
 SEEDS="$SEEDS $ADDRMAN $EXTRA_SEEDS"
 
 # --- Phase 1: discovery crawl (no per-peer fork check → fast, broad) ---
