@@ -88,16 +88,26 @@ async def probe_node(ip: str, port: int, anchor: bytes, anchor_stop: bytes,
         if not got_version:
             return "unreachable", None
 
-        # 1. membership
+        # 1. membership — read `headers` messages, IGNORING unsolicited block
+        # announcements. A peer that mines/relays a block mid-probe pushes its own
+        # `headers` (prev_block = recent tip, not our anchor); treating that as the
+        # getheaders reply would falsely mark a good node 'not_member' and drop it.
+        # Only a reply whose first prev_block == our anchor confirms membership;
+        # anything else is left as 'unreachable' (never a downgrade).
         writer.write(build_getheaders([anchor], hash_stop=anchor_stop)); await writer.drain()
-        try:
-            payload = await _read_until_headers(reader, read_timeout, 20.0)
-        except (asyncio.TimeoutError, BitcoinProtocolError):
+        member = False
+        hdr_deadline = asyncio.get_event_loop().time() + 20.0
+        while asyncio.get_event_loop().time() < hdr_deadline:
+            try:
+                cmd, payload = await asyncio.wait_for(
+                    read_message(reader, timeout=read_timeout), timeout=read_timeout)
+            except (asyncio.TimeoutError, BitcoinProtocolError):
+                break
+            if cmd == CMD_HEADERS and parse_headers_first_prevblock(payload) == anchor:
+                member = True
+                break
+        if not member:
             return "unreachable", None
-        if payload is None:
-            return "unreachable", None
-        if parse_headers_first_prevblock(payload) != anchor:
-            return "not_member", None
 
         # 2. chain-verified height (best-effort; membership already confirmed)
         verified_height: Optional[int] = None
