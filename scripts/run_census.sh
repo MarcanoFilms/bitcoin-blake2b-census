@@ -97,3 +97,8 @@ pruned = prune_db(os.environ["DB"], gen, keep_days=int(os.environ["REG_KEEP_DAYS
 print(f"census: {d['fork_reachable']} reachable / {d['total_estimate']} est / {d['countries_count']} countries / tip {d['fork_tip']}")
 print(f"registry: {reg['total']} unique nodes ({reg['new']} new) | pruned {pruned} stale DB rows")
 PYEOF
+
+# --- keep our node peered with stable, active BLAKE2b nodes from the registry ---
+if [ "${CENSUS_ADDNODE:-1}" = "1" ]; then
+  "$ROOT/scripts/addpeers.sh" || true
+fi
