@@ -83,24 +83,31 @@ SENSOR_JSON=$($CLI getpeerinfo 2>/dev/null \
 GEN_TS=$(date +%s)
 FORK_TIP="$FORK_TIP" SENSOR="$SENSOR_JSON" GEN_TS="$GEN_TS" DB="$DB" OUT="$WEB/data.json" \
 INTERVAL="$INTERVAL" WEB="$WEB" REG_KEEP_DAYS="${CENSUS_KEEP_DAYS:-90}" \
-"$PY" - <<'PYEOF'
+ACTIVE_HOURS="${CENSUS_ACTIVE_HOURS:-48}" "$PY" - <<'PYEOF'
 import os, json
 from datetime import datetime, timezone
-from knots_network_crawler.census import write_census
-from knots_network_crawler.registry import update_registry, prune_db
+from knots_network_crawler.census import db_reachable_nodes, write_census
+from knots_network_crawler.registry import update_registry, load_active_nodes, registry_count, prune_db
 gen = int(os.environ["GEN_TS"])
+reg_csv = os.path.join(os.environ["WEB"], "registry.csv")
+now_iso = datetime.fromtimestamp(gen, timezone.utc).isoformat()
+
+# 1) this pass's reachable fork nodes (from the DB) -> merge into the registry
+pass_nodes = db_reachable_nodes(os.environ["DB"])
+reg = update_registry(reg_csv, pass_nodes, now_iso)
+
+# 2) build the dashboard from the PERSISTENT registry's active set (not just this pass)
+active = load_active_nodes(reg_csv, gen, active_hours=int(os.environ["ACTIVE_HOURS"]))
 d = write_census(
-    os.environ["DB"], os.environ["OUT"],
-    generated_ts=gen,
+    active, os.environ["OUT"], generated_ts=gen,
     fork_tip=int(os.environ["FORK_TIP"]) or None,
     sensor_peers=json.loads(os.environ["SENSOR"]),
     interval_seconds=int(os.environ["INTERVAL"]),
+    all_time=registry_count(reg_csv),
 )
-now_iso = datetime.fromtimestamp(gen, timezone.utc).isoformat()
-reg = update_registry(os.path.join(os.environ["WEB"], "registry.csv"), d["nodes"], now_iso)
 pruned = prune_db(os.environ["DB"], gen, keep_days=int(os.environ["REG_KEEP_DAYS"]))
-print(f"census: {d['fork_reachable']} reachable / {d['total_estimate']} est / {d['countries_count']} countries / tip {d['fork_tip']}")
-print(f"registry: {reg['total']} unique nodes ({reg['new']} new) | pruned {pruned} stale DB rows")
+print(f"pass: {len(pass_nodes)} verified this run | dashboard: {d['fork_reachable']} active / {d['countries_count']} countries / tip {d['fork_tip']}")
+print(f"registry: {reg['total']} unique ({reg['new']} new) | pruned {pruned} DB rows")
 PYEOF
 
 # --- keep our node peered with stable, active BLAKE2b nodes from the registry ---

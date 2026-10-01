@@ -201,9 +201,9 @@ function render(d){
   </div>` : '';
   const html = headline + `
   <div class="grid stats">
-    <div class="card stat"><div class="label">Reachable nodes</div>
+    <div class="card stat"><div class="label">Active nodes</div>
       <div class="val cyan">${fmt(d.fork_reachable)}</div>
-      <div class="hint">BLAKE2b, chain-verified</div></div>
+      <div class="hint">BLAKE2b, chain-verified · seen in 48h</div></div>
     <div class="card stat"><div class="label">Total estimate</div>
       <div class="val purple">${fmt(d.total_estimate)}</div>
       <div class="hint">+${fmt(d.non_listening_seen)} non-listening seen</div></div>
