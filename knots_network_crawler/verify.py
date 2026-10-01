@@ -47,15 +47,6 @@ MAX_HEADERS_PAYLOAD = 20_000  # bytes; larger reply => far behind, don't parse
 NODE_BLAKE2B = 1 << 28  # service bit advertised by BLAKE2b nodes (NODE_BLAKE2B)
 
 
-async def _read_until_headers(reader, read_timeout: float, budget: float) -> Optional[bytes]:
-    deadline = asyncio.get_event_loop().time() + budget
-    while asyncio.get_event_loop().time() < deadline:
-        cmd, payload = await asyncio.wait_for(read_message(reader, timeout=read_timeout), timeout=read_timeout)
-        if cmd == CMD_HEADERS:
-            return payload
-    return None
-
-
 async def probe_node(ip: str, port: int, anchor: bytes, anchor_stop: bytes,
                      tip_height: Optional[int], tip_header: Optional[bytes], tip_stop: bytes,
                      height_locators: List[Tuple[bytes, int]], header_size: int = 80,
@@ -121,25 +112,41 @@ async def probe_node(ip: str, port: int, anchor: bytes, anchor_stop: bytes,
         if not member:
             return "unreachable", None
 
-        # 2. chain-verified height (best-effort; membership already confirmed)
+        # 2. chain-verified height (best-effort; membership already confirmed).
+        # Like the membership probe, IGNORE unsolicited block announcements: a peer
+        # with sendheaders active pushes its own `headers` (first prev = a recent
+        # block, not one of our locators). Only the reply whose first prev_block is
+        # one of the locators we sent is the answer to our getheaders — accepting an
+        # announcement instead would leave the height unmeasured (first_prev matches
+        # no locator). This matters now that the bit-28 fast path skips the first
+        # getheaders, so the height probe is the one that meets the announcement.
         verified_height: Optional[int] = None
         if height_locators and tip_height:
+            loc_hashes = {h for h, _ in height_locators}
             writer.write(build_getheaders([h for h, _ in height_locators], hash_stop=tip_stop))
             await writer.drain()
-            try:
-                hpayload = await _read_until_headers(reader, read_timeout, 20.0)
-            except (asyncio.TimeoutError, BitcoinProtocolError):
-                hpayload = None
-            if hpayload is not None:
+            hdeadline = asyncio.get_event_loop().time() + 20.0
+            while asyncio.get_event_loop().time() < hdeadline:
+                try:
+                    cmd, hpayload = await asyncio.wait_for(
+                        read_message(reader, timeout=read_timeout), timeout=read_timeout)
+                except (asyncio.TimeoutError, BitcoinProtocolError):
+                    break
+                if cmd != CMD_HEADERS:
+                    continue
+                first_prev = parse_headers_first_prevblock(hpayload)
+                if first_prev not in loc_hashes:
+                    continue  # unsolicited announcement — keep waiting for our reply
                 if len(hpayload) > MAX_HEADERS_PAYLOAD:
-                    verified_height = max(0, tip_height - 2000)  # far behind
-                else:
-                    count, first_prev, last_header = parse_headers_summary(hpayload, header_size)
-                    loc_height = next((ht for hh, ht in height_locators if hh == first_prev), None)
-                    if loc_height is not None:
-                        verified_height = min(tip_height, loc_height + count)
-                        if tip_header is not None and last_header == tip_header:
-                            verified_height = tip_height
+                    verified_height = max(0, tip_height - 2000)  # far behind, don't parse
+                    break
+                count, _fp, last_header = parse_headers_summary(hpayload, header_size)
+                loc_height = next((ht for hh, ht in height_locators if hh == first_prev), None)
+                if loc_height is not None:
+                    verified_height = min(tip_height, loc_height + count)
+                    if tip_header is not None and last_header == tip_header:
+                        verified_height = tip_height
+                break
         return "member", verified_height
     except Exception:
         # Membership was already confirmed above (we'd have returned otherwise),
