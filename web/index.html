@@ -160,11 +160,13 @@ function tickRefresh(){
   if(!_gen) return;
   const now = Date.now()/1000;
   const ago = now - _gen;
-  const next = _gen + _interval - now;
+  // The crawler runs hourly on the hour (local clock), so the next run is the top
+  // of the next hour — not generated+interval (which drifts with pass duration).
+  const d = new Date();
+  const nextTop = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours()+1, 0, 0, 0);
+  const next = nextTop.getTime()/1000 - now;
   const el = document.getElementById('refresh');
-  el.innerHTML = next > 0
-    ? `updated <b>${humanDur(ago)} ago</b> · next in <b>${humanDur(next)}</b>`
-    : `updated <b>${humanDur(ago)} ago</b> · <b>refresh due…</b>`;
+  el.innerHTML = `updated <b>${humanDur(ago)} ago</b> · next run <b>${humanDur(next)}</b>`;
 }
 setInterval(tickRefresh, 1000);
 
