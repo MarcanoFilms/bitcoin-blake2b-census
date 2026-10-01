@@ -47,10 +47,19 @@ print("\n".join(p for _, p in rows[:cap]))
 PY
 )
 
+# Pinned peers: always kept, independent of the registry (e.g. community nodes on
+# non-standard ports that a pass may not have crawled yet). Space-separated host:port.
+PINNED="${ADDPEERS_PINNED:-nodoblake2b.airdns.org:11010}"
+
 count=0
 while IFS= read -r peer; do
     [ -z "$peer" ] && continue
     $CLI addnode "$peer" add >/dev/null 2>&1 || true   # ignore "already added"
     count=$((count + 1))
 done <<< "$PEERS"
-echo "addpeers: ensured $count stable BLAKE2b peers (min_seen=$MIN_SEEN, active<=${MAX_AGE_DAYS}d)"
+for peer in $PINNED; do
+    [ -z "$peer" ] && continue
+    $CLI addnode "$peer" add >/dev/null 2>&1 || true
+    count=$((count + 1))
+done
+echo "addpeers: ensured $count stable BLAKE2b peers (min_seen=$MIN_SEEN, active<=${MAX_AGE_DAYS}d, +pinned)"
