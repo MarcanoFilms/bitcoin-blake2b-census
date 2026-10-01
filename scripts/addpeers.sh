@@ -14,7 +14,8 @@ DATADIR="${BITCOIN_DATADIR:-/mnt/t7/asus-fullnode/bitcoin}"
 CLI="bitcoin-cli -datadir=$DATADIR"
 MIN_SEEN="${ADDPEERS_MIN_SEEN:-2}"       # seen in >= N passes => stable
 MAX_AGE_DAYS="${ADDPEERS_MAX_AGE_DAYS:-7}"  # active within N days
-MAX_PEERS="${ADDPEERS_MAX:-150}"         # cap (node maxconnections has headroom)
+MAX_PEERS="${ADDPEERS_MAX:-40}"          # cap: enough real BLAKE2b peers without
+                                          # 150 persistent conns riding the uplink 24/7
 
 [ -f "$REG" ] || { echo "addpeers: no registry yet"; exit 0; }
 

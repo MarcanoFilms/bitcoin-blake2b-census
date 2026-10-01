@@ -12,6 +12,10 @@ DATADIR="${BITCOIN_DATADIR:-/mnt/t7/asus-fullnode/bitcoin}"
 CLI="${BITCOIN_CLI:-bitcoin-cli} -datadir=$DATADIR"
 DURATION="${CENSUS_DURATION:-600}"
 CONCURRENCY="${CENSUS_CONCURRENCY:-10}"
+# Discovery is now light: the bit-28 fast path + registry re-seeding mean we no
+# longer need to sweep 20k nodes per pass. A smaller cap keeps getaddr traffic off
+# the node's uplink; coverage still accumulates via the persistent registry.
+MAX_NODES="${CENSUS_MAX_NODES:-3000}"
 # Should match the systemd timer period so the page's "next update" countdown is accurate.
 INTERVAL="${CENSUS_INTERVAL:-3600}"
 
@@ -37,7 +41,31 @@ EXTRA_SEEDS="--seed 179.27.118.130:8343 --seed nodoblake2b.airdns.org:11010 \
 --seed 94.59.27.202:9333 --seed 64.68.204.49:8333 --seed 84.213.189.64:9333 \
 --seed 82.67.102.15:8333 \
 --seed w2okrqbcuvkqg75aa6lodlso2rfoxe3c7arlp5kznawxi7wev26skead.onion:8333"
-SEEDS="$SEEDS $ADDRMAN $EXTRA_SEEDS"
+# Registry-first: always re-seed every BLAKE2b node we've confirmed recently, so a
+# light discovery crawl still re-verifies the known set instead of re-finding it.
+# This is what lets us shrink --max-nodes without losing the known fork nodes.
+REG_SEEDS=$("$PY" - <<'PY' 2>/dev/null || true
+import csv, os
+from datetime import datetime, timezone
+reg = os.path.join(os.path.dirname(os.environ.get("WEB","web")) or ".", "registry.csv") if False else "web/registry.csv"
+now = datetime.now(timezone.utc).timestamp()
+out = []
+try:
+    for r in csv.DictReader(open(reg)):
+        try:
+            if now - datetime.fromisoformat(r["last_seen"]).timestamp() > 7*86400:
+                continue
+        except Exception:
+            continue
+        a = r.get("address",""); p = r.get("port","8333")
+        if a:
+            out.append(f"--seed [{a}]:{p}" if ":" in a and not a.endswith((".onion",".i2p")) else f"--seed {a}:{p}")
+except FileNotFoundError:
+    pass
+print(" ".join(out))
+PY
+)
+SEEDS="$SEEDS $ADDRMAN $EXTRA_SEEDS $REG_SEEDS"
 
 # --- Phase 1: discovery crawl (no per-peer fork check → fast, broad) ---
 # Hard wall-clock cap with `timeout`: the crawl's internal --duration doesn't
@@ -46,7 +74,7 @@ SEEDS="$SEEDS $ADDRMAN $EXTRA_SEEDS"
 # shellcheck disable=SC2086
 timeout -k 20 "$((DURATION + 90))" "$PY" -m knots_network_crawler crawl \
   --mode normal --concurrency "$CONCURRENCY" --duration "$DURATION" \
-  --max-nodes 20000 --no-fork-detect --yes --db "$DB" $SEEDS >/dev/null 2>&1 || true
+  --max-nodes "$MAX_NODES" --no-fork-detect --yes --db "$DB" $SEEDS >/dev/null 2>&1 || true
 
 # --- Height reference (sampled ONCE so every node is measured against it) ---
 # Our tip height/hash/raw-header + getheaders locators [tip-10,-100,-1000,anchor].

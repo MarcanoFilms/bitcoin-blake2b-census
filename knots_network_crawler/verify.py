@@ -64,9 +64,13 @@ async def probe_node(ip: str, port: int, anchor: bytes, anchor_stop: bytes,
     except Exception:
         return "unreachable", None
     try:
+        # Per-phase budget scales with read_timeout so a slow uplink (e.g. a
+        # congested VPN at ~19s/round-trip) doesn't cut a loop off before the reply
+        # arrives — the whole point of raising read_timeout.
+        budget = max(20.0, read_timeout * 2.0)
         writer.write(make_version_message(addr_recv_ip=ip, addr_recv_port=port, start_height=0))
         await writer.drain()
-        deadline = asyncio.get_event_loop().time() + 20.0
+        deadline = asyncio.get_event_loop().time() + budget
         got_version = got_verack = False
         svc_blake2b = False
         while asyncio.get_event_loop().time() < deadline and not (got_version and got_verack):
@@ -99,7 +103,7 @@ async def probe_node(ip: str, port: int, anchor: bytes, anchor_stop: bytes,
             # Only a reply whose first prev_block == our anchor confirms membership;
             # anything else is left as 'unreachable' (never a downgrade).
             writer.write(build_getheaders([anchor], hash_stop=anchor_stop)); await writer.drain()
-            hdr_deadline = asyncio.get_event_loop().time() + 20.0
+            hdr_deadline = asyncio.get_event_loop().time() + budget
             while asyncio.get_event_loop().time() < hdr_deadline:
                 try:
                     cmd, payload = await asyncio.wait_for(
@@ -125,7 +129,7 @@ async def probe_node(ip: str, port: int, anchor: bytes, anchor_stop: bytes,
             loc_hashes = {h for h, _ in height_locators}
             writer.write(build_getheaders([h for h, _ in height_locators], hash_stop=tip_stop))
             await writer.drain()
-            hdeadline = asyncio.get_event_loop().time() + 20.0
+            hdeadline = asyncio.get_event_loop().time() + budget
             while asyncio.get_event_loop().time() < hdeadline:
                 try:
                     cmd, hpayload = await asyncio.wait_for(
@@ -167,6 +171,8 @@ async def verify_candidates(db: Database, cfg: CrawlerConfig,
                             tip_hash: Optional[str] = None,
                             tip_header: Optional[str] = None,
                             locators: Optional[List[Tuple[str, int]]] = None,
+                            read_timeout: float = 12.0,
+                            connect_timeout: float = 10.0,
                             progress=None) -> dict:
     """Probe each candidate for membership + chain-verified height; persist results."""
     anchor = hash_display_to_internal(cfg.fork_anchor_hash)
@@ -183,7 +189,8 @@ async def verify_candidates(db: Database, cfg: CrawlerConfig,
             status, vheight = await probe_node(
                 ip, port, anchor, anchor_stop, tip_height, tip_header_b, tip_stop_b, loc,
                 header_size=getattr(cfg, "fork_header_size", 80),
-                tor_socks=cfg.tor_socks_addr, i2p_socks=cfg.i2p_socks_addr)
+                tor_socks=cfg.tor_socks_addr, i2p_socks=cfg.i2p_socks_addr,
+                connect_timeout=connect_timeout, read_timeout=read_timeout)
             counts["checked"] += 1
             if status == "member":
                 await db.set_fork(ip, port, True, vheight)

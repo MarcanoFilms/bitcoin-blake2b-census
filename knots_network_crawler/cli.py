@@ -259,6 +259,10 @@ def cmd_verify(
     tip_hash = os.environ.get("CENSUS_TIP_HASH") or None
     tip_header = os.environ.get("CENSUS_TIP_HEADER") or None
     locators = json.loads(os.environ["CENSUS_LOCATORS"]) if os.environ.get("CENSUS_LOCATORS") else None
+    # On a slow/congested uplink, give each probe more air so the reply arrives
+    # before we give up (CENSUS_READ_TIMEOUT). Tune via env from run_census.sh.
+    read_timeout = float(os.environ.get("CENSUS_READ_TIMEOUT", "12"))
+    connect_timeout = float(os.environ.get("CENSUS_CONNECT_TIMEOUT", "10"))
 
     async def _run():
         await d.connect()
@@ -266,7 +270,8 @@ def cmd_verify(
         console.print(f"[yellow]Verifying[/yellow] {len(candidates)} candidates at concurrency {concurrency}…")
         counts = await verify_candidates(d, cfg, candidates, concurrency=concurrency,
                                          tip_height=tip_height, tip_hash=tip_hash,
-                                         tip_header=tip_header, locators=locators)
+                                         tip_header=tip_header, locators=locators,
+                                         read_timeout=read_timeout, connect_timeout=connect_timeout)
         console.print(f"[green]Done:[/green] {counts['fork']} BLAKE2b / {counts['checked']} checked "
                       f"({counts.get('heights',0)} heights)")
 
