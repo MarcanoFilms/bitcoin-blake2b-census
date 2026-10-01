@@ -98,11 +98,13 @@ timeout -k 20 "${CENSUS_VERIFY_TIMEOUT:-600}" "$PY" -m knots_network_crawler ver
   --db "$DB" --concurrency "${CENSUS_VERIFY_CONCURRENCY:-12}" >/dev/null 2>&1 || true
 
 # --- fork tip + passive sensor (non-listening candidates) ---
-# Only count inbound peers that are plausibly BLAKE2b: the shared port 8333 means
-# our node also gets mainnet Core, wallets, and network scanners (dsn.*, Metrika-
-# Bitnodes, bitcoinj…) plus local services on 127.0.0.1. Filter to Knots subver +
-# a height at/after activation + a public address so the estimate isn't inflated.
-FORK_TIP=$($CLI getblockcount 2>/dev/null || echo 0)
+# Use the SAME tip sampled at the start of the pass (CENSUS_TIP_HEIGHT) as the
+# dashboard reference, NOT a fresh getblockcount. Node heights were measured
+# against that sampled tip (their reply is capped at it), so a node that is caught
+# up reports exactly it. Re-sampling here would advance the bar by however many
+# blocks arrived during the ~30-min pass, making every caught-up node look
+# "behind" purely from clock drift. Fall back to a fresh count only if unset.
+FORK_TIP="${CENSUS_TIP_HEIGHT:-$($CLI getblockcount 2>/dev/null || echo 0)}"
 SENSOR_JSON=$($CLI getpeerinfo 2>/dev/null \
   | "$PY" -c $'import sys,json,ipaddress\ndef pub(ip):\n try:\n  a=ipaddress.ip_address(ip); return not (a.is_private or a.is_loopback or a.is_link_local)\n except Exception:\n  return ip.endswith(".onion") or ip.endswith(".i2p")\nout=[]\nfor x in json.load(sys.stdin):\n if not x.get("inbound"): continue\n if "knots" not in (x.get("subver","") or "").lower(): continue\n if (x.get("startingheight") or 0) < 961640: continue\n a=x.get("addr","")\n ip=a.rsplit(":",1)[0].strip("[]") if a.count(":")==1 else a.strip("[]")\n if pub(ip): out.append(a)\nprint(json.dumps(out))' \
   || echo "[]")
