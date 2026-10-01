@@ -87,6 +87,7 @@ class KnotsNetworkCrawler:
         self.concurrent = asyncio.Semaphore(config.max_concurrent)
         self.best_height: int = 0
         self._session_id: Optional[int] = None
+        self._tor_enqueued: int = 0  # count of .onion/.i2p enqueued this run (capped)
 
         # BLAKE2b chain detection: locator = the post-activation anchor block, in wire
         # (internal, little-endian) order. A BLAKE2b node returns a first header
@@ -528,6 +529,10 @@ class KnotsNetworkCrawler:
         for addr in addrs_received[: self.cfg.max_addrs_per_peer]:
             host = addr.ip or ""
             if host.endswith(".onion") or host.endswith(".i2p"):
+                # Bound Tor/I2P work so slow circuits don't drown the pass.
+                if self._tor_enqueued >= getattr(self.cfg, "max_tor_i2p_queue", 60):
+                    continue
+                self._tor_enqueued += 1
                 port = addr.port or 8333  # I2P often advertises port 0
             else:
                 if addr.port < 1024 or addr.port > 65535:

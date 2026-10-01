@@ -27,7 +27,7 @@ SEEDS=$($CLI getpeerinfo 2>/dev/null \
   | "$PY" -c $'import sys,json,re\nf=re.compile(r"^\\d{1,3}(\\.\\d{1,3}){3}$")\nips=[p["addr"].rsplit(":",1)[0] for p in json.load(sys.stdin) if p.get("addr") and not p.get("inbound")]\nprint(" ".join("--seed "+ip for ip in ips if f.match(ip)))' \
   || true)
 ADDRMAN=$($CLI getnodeaddresses 0 2>/dev/null \
-  | "$PY" -c $'import sys,json,re\nf=re.compile(r"^\\d{1,3}(\\.\\d{1,3}){3}$")\na=json.load(sys.stdin)\nv4=[x["address"] for x in a if f.match(x.get("address",""))][:800]\ntor=[x["address"] for x in a if x.get("address","").endswith(".onion")][:150]\ni2p=[x["address"] for x in a if x.get("address","").endswith(".i2p")][:50]\nprint(" ".join("--seed "+s for s in v4+tor+i2p))' \
+  | "$PY" -c $'import sys,json,re\nf=re.compile(r"^\\d{1,3}(\\.\\d{1,3}){3}$")\na=json.load(sys.stdin)\nv4=[x["address"] for x in a if f.match(x.get("address",""))][:800]\ntor=[x["address"] for x in a if x.get("address","").endswith(".onion")][:25]\ni2p=[x["address"] for x in a if x.get("address","").endswith(".i2p")][:10]\nprint(" ".join("--seed "+s for s in v4+tor+i2p))' \
   || true)
 # Extra known-good nodes contributed by the community (host:port honored, so
 # nodes on non-standard ports and Tor are reached too). Curated list from Kilombino.

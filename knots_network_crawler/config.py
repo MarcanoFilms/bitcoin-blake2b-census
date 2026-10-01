@@ -96,6 +96,11 @@ class CrawlerConfig:
     # single biggest coverage lever.
     tor_socks: Optional[str] = "127.0.0.1:9050"
     i2p_socks: Optional[str] = "127.0.0.1:4447"
+    # Cap how many .onion/.i2p peers a single crawl will enqueue. Tor/I2P circuits
+    # are slow (worse over a congested VPN), so an uncapped flood of gossip-
+    # discovered onions drowns the pass. Clearnet is unaffected; the rest are
+    # picked up on later passes.
+    max_tor_i2p_queue: int = 60
 
     def _socks_tuple(self, val):
         if not val:
