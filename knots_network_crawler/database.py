@@ -111,7 +111,18 @@ class Database:
             self._conn = await aiosqlite.connect(self.db_path)
             self._conn.row_factory = aiosqlite.Row
             await self._conn.executescript(DB_SCHEMA)
+            await self._migrate()
             await self._conn.commit()
+
+    async def _migrate(self) -> None:
+        """Add columns introduced after a DB was first created — `CREATE TABLE IF
+        NOT EXISTS` never alters an existing table, so a DB predating a new column
+        (e.g. verified_height) silently lacks it and writes to it are swallowed."""
+        async with self._conn.execute("PRAGMA table_info(nodes)") as cur:
+            cols = {r[1] for r in await cur.fetchall()}
+        for name, decl in (("verified_height", "INTEGER"),):
+            if name not in cols:
+                await self._conn.execute(f"ALTER TABLE nodes ADD COLUMN {name} {decl}")
 
     async def close(self) -> None:
         if self._conn:
