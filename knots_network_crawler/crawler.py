@@ -146,14 +146,27 @@ class KnotsNetworkCrawler:
 
     async def _resolve_dns_seed(self, hostname: str, default_port: int = 8333) -> List[Tuple[str, int]]:
         out: List[Tuple[str, int]] = []
-        # Honor an explicit host:port (e.g. a node on a non-standard port). Only
-        # split when there's a single colon and the suffix is a port number, so
-        # bare IPv6 addresses (many colons) are left intact.
+        # Honor an explicit host:port (e.g. a node on a non-standard port).
         port = default_port
-        if hostname.count(":") == 1:
+        hostname = hostname.strip()
+        if hostname.startswith("[") and "]" in hostname:
+            # [ipv6]:port  — strip brackets, pull the port after ]
+            host_part, _, rest = hostname[1:].partition("]")
+            hostname = host_part
+            if rest.startswith(":") and rest[1:].isdigit():
+                port = int(rest[1:])
+        elif hostname.count(":") == 1:
+            # host:port (single colon); bare IPv6 (many colons) left intact
             host_part, _, port_part = hostname.rpartition(":")
             if port_part.isdigit():
                 hostname, port = host_part, int(port_part)
+        # .onion / .i2p have NO DNS: the hostname IS the destination and is routed
+        # through the Tor/i2pd SOCKS proxy at connect time. Running them through
+        # getaddrinfo (as every seed used to be) raised an error and silently
+        # dropped them — which is why the census showed 0 Tor / 0 I2P forever.
+        # Enqueue them directly instead.
+        if hostname.endswith(".onion") or hostname.endswith(".i2p"):
+            return [(hostname, port)]
         try:
             infos = await asyncio.get_event_loop().getaddrinfo(
                 hostname, port, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM
@@ -335,10 +348,16 @@ class KnotsNetworkCrawler:
         node_key = f"{ip}:{port}"
         start = time.perf_counter()
 
+        # Per-transport budgets: .onion/.i2p are slow to establish, so they get a
+        # longer connect/read window than clearnet (otherwise every darknet connect
+        # times out and those nodes never enter the census).
+        ct, rt = self.cfg.net_timeouts(ip)
+        peer_budget = max(self.cfg.crawl_timeout_per_peer, rt * 2)
+
         try:
             reader, writer = await open_p2p_connection(
                 ip, port, tor_socks=self.cfg.tor_socks_addr,
-                i2p_socks=self.cfg.i2p_socks_addr, timeout=self.cfg.connect_timeout,
+                i2p_socks=self.cfg.i2p_socks_addr, timeout=ct,
             )
         except Exception:
             # Connection failed or filtered - still record a "seen" if we want, but usually skip
@@ -362,13 +381,13 @@ class KnotsNetworkCrawler:
             # 2. Expect version + verack (order can vary slightly)
             verack_received = False
             version_received = False
-            deadline = time.time() + self.cfg.crawl_timeout_per_peer
+            deadline = time.time() + peer_budget
 
             while time.time() < deadline and not (version_received and verack_received):
                 try:
                     cmd, payload = await asyncio.wait_for(
-                        read_message(reader, timeout=self.cfg.read_timeout),
-                        timeout=8.0,
+                        read_message(reader, timeout=rt),
+                        timeout=rt,
                     )
                 except (asyncio.TimeoutError, BitcoinProtocolError):
                     break
@@ -407,12 +426,12 @@ class KnotsNetworkCrawler:
                 # header that arrives right after its sendcmpct/ping/getheaders/
                 # feefilter burst, so a short window keeps the crawl fast while
                 # staying reliable.
-                hdr_deadline = time.time() + 25.0
+                hdr_deadline = time.time() + max(25.0, rt)
                 while time.time() < hdr_deadline:
                     try:
                         cmd, payload = await asyncio.wait_for(
-                            read_message(reader, timeout=self.cfg.read_timeout),
-                            timeout=12.0,
+                            read_message(reader, timeout=rt),
+                            timeout=rt,
                         )
                     except (asyncio.TimeoutError, BitcoinProtocolError):
                         break

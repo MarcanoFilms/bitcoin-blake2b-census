@@ -102,6 +102,30 @@ class CrawlerConfig:
     # picked up on later passes.
     max_tor_i2p_queue: int = 60
 
+    # Per-network connect/read timeouts. The darknet transports are an order of
+    # magnitude slower to establish than clearnet: a fresh Tor circuit is ~10-30s
+    # and an I2P tunnel build is ~20-60s, so the single clearnet timeout (~12s)
+    # silently expires EVERY .onion/.i2p connect — which is exactly why they never
+    # make it into the census. Give each transport its own, generous budget so the
+    # darknet lane actually completes (it just takes the time it needs).
+    onion_connect_timeout: float = 30.0
+    onion_read_timeout: float = 30.0
+    # I2P cold-start tunnels are the slowest to build — measured 60-90s for a
+    # destination i2pd hasn't talked to yet (subsequent connects reuse the tunnel
+    # and are fast). Budget 90s so first contact actually lands.
+    i2p_connect_timeout: float = 90.0
+    i2p_read_timeout: float = 60.0
+
+    def net_timeouts(self, host: str) -> tuple[float, float]:
+        """(connect_timeout, read_timeout) for a host, by transport. Clearnet uses
+        the fast defaults; .onion / .i2p get their own longer budgets."""
+        h = (host or "").lower()
+        if h.endswith(".onion"):
+            return (self.onion_connect_timeout, self.onion_read_timeout)
+        if h.endswith(".i2p"):
+            return (self.i2p_connect_timeout, self.i2p_read_timeout)
+        return (self.connect_timeout, self.read_timeout)
+
     def _socks_tuple(self, val):
         if not val:
             return None

@@ -28,10 +28,10 @@ mkdir -p "$ROOT/data" "$WEB"
 # per type so slow Tor/I2P connects don't dominate the pass (IPv4 bootstraps fast;
 # the rest is discovered via addr gossip and crawled through SOCKS).
 SEEDS=$($CLI getpeerinfo 2>/dev/null \
-  | "$PY" -c $'import sys,json,re\nf=re.compile(r"^\\d{1,3}(\\.\\d{1,3}){3}$")\nips=[p["addr"].rsplit(":",1)[0] for p in json.load(sys.stdin) if p.get("addr") and not p.get("inbound")]\nprint(" ".join("--seed "+ip for ip in ips if f.match(ip)))' \
+  | "$PY" -c $'import sys,json\npeers=json.load(sys.stdin)\n# keep the FULL addr (host:port, [v6]:port, onion/i2p) of every outbound peer:\n# these are live, chain-verified fork nodes. Stripping the port mis-seeded nodes\n# on non-standard ports as :8333; keeping it reaches them, and keeping onion/i2p\n# seeds the darknet lane from guaranteed-good nodes.\nprint(" ".join("--seed "+p["addr"] for p in peers if p.get("addr") and not p.get("inbound")))' \
   || true)
 ADDRMAN=$($CLI getnodeaddresses 0 2>/dev/null \
-  | "$PY" -c $'import sys,json,re\nf=re.compile(r"^\\d{1,3}(\\.\\d{1,3}){3}$")\na=json.load(sys.stdin)\nv4=[x["address"] for x in a if f.match(x.get("address",""))][:800]\ntor=[x["address"] for x in a if x.get("address","").endswith(".onion")][:25]\ni2p=[x["address"] for x in a if x.get("address","").endswith(".i2p")][:10]\nprint(" ".join("--seed "+s for s in v4+tor+i2p))' \
+  | "$PY" -c $'import sys,json\na=json.load(sys.stdin)\ndef s(x):\n host=x.get("address","");port=x.get("port",8333);net=x.get("network","")\n if not host: return None\n return "[%s]:%d"%(host,port) if net=="ipv6" else "%s:%d"%(host,port)\n# preserve the real port (addrman knows it) and raise the darknet caps now that the\n# Tor/I2P lane actually completes (per-network timeouts). Clearnet still dominates.\nv4=[s(x) for x in a if x.get("network")=="ipv4"][:800]\ntor=[s(x) for x in a if str(x.get("address","")).endswith(".onion")][:40]\ni2p=[s(x) for x in a if str(x.get("address","")).endswith(".i2p")][:25]\nprint(" ".join("--seed "+z for z in v4+tor+i2p if z))' \
   || true)
 # Extra known-good nodes contributed by the community (host:port honored, so
 # nodes on non-standard ports and Tor are reached too). Curated list from Kilombino.

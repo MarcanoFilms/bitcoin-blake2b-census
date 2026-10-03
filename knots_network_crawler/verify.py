@@ -186,11 +186,17 @@ async def verify_candidates(db: Database, cfg: CrawlerConfig,
 
     async def one(ip: str, port: int):
         async with sem:
+            # Darknet transports get their own longer budgets (Tor/I2P are slow to
+            # establish); clearnet keeps the caller's tuning.
+            if ip.lower().endswith((".onion", ".i2p")):
+                ct, rt = cfg.net_timeouts(ip)
+            else:
+                ct, rt = connect_timeout, read_timeout
             status, vheight = await probe_node(
                 ip, port, anchor, anchor_stop, tip_height, tip_header_b, tip_stop_b, loc,
                 header_size=getattr(cfg, "fork_header_size", 80),
                 tor_socks=cfg.tor_socks_addr, i2p_socks=cfg.i2p_socks_addr,
-                connect_timeout=connect_timeout, read_timeout=read_timeout)
+                connect_timeout=ct, read_timeout=rt)
             counts["checked"] += 1
             if status == "member":
                 await db.set_fork(ip, port, True, vheight)
