@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS nodes (
     is_knots INTEGER DEFAULT 0,
     is_fork INTEGER DEFAULT 0,
     verified_height INTEGER,
+    fork_checked_at INTEGER,   -- unix ts of last DEFINITIVE fork determination (member/not), for the non-fork re-probe cooldown
 
     latency_ms REAL,
 
@@ -120,7 +121,7 @@ class Database:
         (e.g. verified_height) silently lacks it and writes to it are swallowed."""
         async with self._conn.execute("PRAGMA table_info(nodes)") as cur:
             cols = {r[1] for r in await cur.fetchall()}
-        for name, decl in (("verified_height", "INTEGER"),):
+        for name, decl in (("verified_height", "INTEGER"), ("fork_checked_at", "INTEGER")):
             if name not in cols:
                 await self._conn.execute(f"ALTER TABLE nodes ADD COLUMN {name} {decl}")
 
@@ -291,15 +292,25 @@ class Database:
             rows = await cur.fetchall()
             return [self._row_to_node(r) for r in rows]
 
-    async def get_fork_candidates(self, limit: int = 20000) -> List[tuple]:
+    async def get_fork_candidates(self, limit: int = 20000,
+                                  nonfork_cooldown_seconds: int = 7 * 86400) -> List[tuple]:
         """Reachable nodes that could be on the chain (Knots user agent, at or
-        past the activation height). Returns (ip, port) for a focused verify pass."""
+        past the activation height). Returns (ip, port) for a focused verify pass.
+
+        Skips nodes CONFIRMED non-fork (plain Bitcoin-Knots) within the cooldown
+        window — their user agent is identical to the fork's, so re-probing them
+        every pass only burns budget confirming the same 'not a member'. Known
+        fork nodes (is_fork=1) and never-checked nodes (fork_checked_at IS NULL)
+        are always included; fork nodes are ordered first so a truncated pass
+        verifies them before it runs out of candidates (matters for slow Tor/I2P)."""
         if not self._conn:
             await self.connect()
         async with self._conn.execute(
             "SELECT ip, port FROM nodes WHERE services_listening=1 AND is_knots=1 "
-            "ORDER BY last_seen DESC LIMIT ?",
-            (limit,),
+            "AND (is_fork=1 OR fork_checked_at IS NULL "
+            "     OR fork_checked_at < CAST(strftime('%s','now') AS INTEGER) - ?) "
+            "ORDER BY is_fork DESC, last_seen DESC LIMIT ?",
+            (nonfork_cooldown_seconds, limit),
         ) as cur:
             return [(r["ip"], r["port"]) for r in await cur.fetchall()]
 
@@ -307,14 +318,18 @@ class Database:
                        verified_height: Optional[int] = None) -> None:
         if not self._conn:
             await self.connect()
+        # Stamp the determination time so the verify phase can skip re-probing
+        # confirmed non-fork (plain Bitcoin-Knots) nodes for a cooldown window.
         if verified_height is not None:
             await self._conn.execute(
-                "UPDATE nodes SET is_fork = ?, verified_height = ? WHERE ip = ? AND port = ?",
+                "UPDATE nodes SET is_fork = ?, verified_height = ?, "
+                "fork_checked_at = CAST(strftime('%s','now') AS INTEGER) WHERE ip = ? AND port = ?",
                 (1 if is_fork else 0, verified_height, ip, port),
             )
         else:
             await self._conn.execute(
-                "UPDATE nodes SET is_fork = ? WHERE ip = ? AND port = ?",
+                "UPDATE nodes SET is_fork = ?, "
+                "fork_checked_at = CAST(strftime('%s','now') AS INTEGER) WHERE ip = ? AND port = ?",
                 (1 if is_fork else 0, ip, port),
             )
         await self._conn.commit()
