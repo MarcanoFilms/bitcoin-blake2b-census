@@ -220,7 +220,7 @@ function render(d){
       <div class="val" style="font-size:1.7rem">${fmt(d.fork_tip)}</div>
       <div class="hint">${fmt(d.heights.tip)} at tip · ${fmt(d.heights.behind)} behind${d.heights.unknown?' · '+fmt(d.heights.unknown)+' unknown':''}</div></div>
     <div class="card stat"><div class="label">All-time nodes</div>
-      <div class="val" id="rec-total" style="color:var(--green)">—</div>
+      <div class="val" id="rec-total" style="color:var(--green)">${fmt(d.fork_total)}</div>
       <div class="hint" id="rec-hint">unique ever recorded</div></div>
   </div>
 
@@ -312,7 +312,7 @@ function loadRegistry(){
   if(!totEl) return;
   fetch(location.protocol==='file:' ? 'registry.csv' : 'registry.csv?t='+Date.now())
     .then(r=>r.ok?r.text():'').then(txt=>{
-      const lines=txt.trim().split('\n'); if(lines.length<2){totEl.textContent='—';return;}
+      const lines=txt.trim().split('\n'); if(lines.length<2){return;} // número ya viene de data.json; registry.csv solo enriquece el hint
       const head=lines[0].split(','); const iLast=head.indexOf('last_seen'), iFirst=head.indexOf('first_seen');
       const now=Date.now(); let total=0, active=0, oldest=Infinity;
       for(let i=1;i<lines.length;i++){
@@ -323,7 +323,7 @@ function loadRegistry(){
       totEl.textContent=fmt(total);
       const since=isFinite(oldest)?new Date(oldest).toLocaleDateString('en-US',{month:'short',year:'numeric'}):'';
       hintEl.textContent=`${fmt(active)} active (30d) · since ${since}`;
-    }).catch(()=>{totEl.textContent='—';});
+    }).catch(()=>{}); // si falla registry.csv, el número de data.json queda intacto
 }
 
 // ---- Node map: real continents (Natural Earth) + dots, same equirectangular
