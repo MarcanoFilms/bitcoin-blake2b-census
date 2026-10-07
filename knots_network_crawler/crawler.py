@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import itertools
 import random
 import socket
 import time
@@ -54,6 +55,16 @@ from .protocol import (
 
 ProgressCallback = Callable[[str, dict], None]
 
+# Snowball BFS priorities (lower value = crawled sooner). The BLAKE2b fork shares
+# magic + port 8333 with Bitcoin mainnet, so a random peer is far more likely to be
+# a mainnet node than a fork node. But fork nodes preferentially peer with other
+# fork nodes (NODE_BLAKE2B, reinforced by Knots 29.4.3 PR #398), so peers advertised
+# BY a fork-verified node are the richest vein. We crawl those first and let the
+# mainnet-adjacent frontier drain last — same coverage, far better yield per pass.
+PRIO_FORK = 0    # peers advertised by a fork-verified node
+PRIO_SEED = 1    # bootstrap + DNS seeds + known-fork nodes from DB
+PRIO_NORMAL = 2  # peers from non-fork / unknown nodes
+
 
 @dataclass
 class CrawlStats:
@@ -83,7 +94,11 @@ class KnotsNetworkCrawler:
 
         self.stats = CrawlStats()
         self.seen: Set[str] = set()                 # ip:port during this run
-        self.to_crawl: asyncio.Queue[Tuple[str, int]] = asyncio.Queue()
+        # Priority queue for snowball BFS: items are (priority, seq, ip, port).
+        # seq is a monotonic counter so ties break FIFO (preserving BFS order within
+        # a priority band) and tuples never fall back to comparing (ip, port).
+        self.to_crawl: asyncio.PriorityQueue = asyncio.PriorityQueue()
+        self._seq = itertools.count()
         self.concurrent = asyncio.Semaphore(config.max_concurrent)
         self.best_height: int = 0
         self._session_id: Optional[int] = None
@@ -106,6 +121,15 @@ class KnotsNetworkCrawler:
         # For wave scheduling (reduces thundering herd)
         self._work_scheduled: Deque[float] = deque()
 
+    async def _enqueue(self, ip: str, port: int, priority: int) -> bool:
+        """Add a target to the priority queue if unseen this run. Returns True if added."""
+        key = f"{ip}:{port}"
+        if key in self.seen:
+            return False
+        self.seen.add(key)
+        await self.to_crawl.put((priority, next(self._seq), ip, port))
+        return True
+
     async def bootstrap(self) -> int:
         """
         Seed the queue with DNS-resolved seeds + hardcoded bootstrap nodes.
@@ -115,10 +139,7 @@ class KnotsNetworkCrawler:
 
         # Hardcoded
         for ip, port in get_default_bootstrap_nodes():
-            key = f"{ip}:{port}"
-            if key not in self.seen:
-                self.seen.add(key)
-                await self.to_crawl.put((ip, port))
+            if await self._enqueue(ip, port, PRIO_SEED):
                 added += 1
 
         # Resolve DNS seeds (best effort, parallel)
@@ -130,10 +151,7 @@ class KnotsNetworkCrawler:
         for res in results:
             if isinstance(res, list):
                 for ip, port in res:
-                    key = f"{ip}:{port}"
-                    if key not in self.seen:
-                        self.seen.add(key)
-                        await self.to_crawl.put((ip, port))
+                    if await self._enqueue(ip, port, PRIO_SEED):
                         added += 1
 
         # Also load previously known nodes that are old enough (for refresh)
@@ -209,18 +227,20 @@ class KnotsNetworkCrawler:
         added = 0
         async with self.db._conn.execute(
             """
-            SELECT ip, port FROM nodes
+            SELECT ip, port, is_fork FROM nodes
             WHERE (last_crawled IS NULL OR last_crawled < ?)
-            ORDER BY last_crawled IS NULL DESC, last_seen DESC
+            ORDER BY is_fork DESC, last_crawled IS NULL DESC, last_seen DESC
             LIMIT ?
             """,
             (cutoff, max_new * 2),
         ) as cur:
             async for row in cur:
-                key = f"{row['ip']}:{row['port']}"
-                if key not in self.seen and added < max_new:
-                    self.seen.add(key)
-                    await self.to_crawl.put((row["ip"], row["port"]))
+                if added >= max_new:
+                    break
+                # Known fork nodes re-enter near the front so the snowball keeps
+                # revisiting the fork subgraph before chasing unknown/mainnet nodes.
+                prio = PRIO_FORK if row["is_fork"] else PRIO_SEED
+                if await self._enqueue(row["ip"], row["port"], prio):
                     added += 1
 
         if added:
@@ -323,7 +343,7 @@ class KnotsNetworkCrawler:
     async def _worker(self, worker_id: int) -> None:
         while True:
             try:
-                ip, port = await self.to_crawl.get()
+                _priority, _seq, ip, port = await self.to_crawl.get()
             except asyncio.CancelledError:
                 break
 
@@ -549,17 +569,19 @@ class KnotsNetworkCrawler:
         if node.start_height and node.start_height > self.stats.max_height:
             self.stats.max_height = node.start_height
 
-        # Enqueue discovered addresses (controlled)
+        # Enqueue discovered addresses (controlled). Peers advertised by a
+        # fork-verified node are prime snowball targets -> crawl them first.
+        child_prio = PRIO_FORK if node.is_fork else PRIO_NORMAL
         new_enqueued = 0
         random.shuffle(addrs_received)  # fairness
         for addr in addrs_received[: self.cfg.max_addrs_per_peer]:
             host = addr.ip or ""
-            if host.endswith(".onion") or host.endswith(".i2p"):
+            is_dark = host.endswith(".onion") or host.endswith(".i2p")
+            if is_dark:
                 # Bound Tor/I2P work so slow circuits don't drown the pass.
                 if self._tor_enqueued >= getattr(self.cfg, "max_tor_i2p_queue", 60):
                     continue
-                self._tor_enqueued += 1
-                port = addr.port or 8333  # I2P often advertises port 0
+                dport = addr.port or 8333  # I2P often advertises port 0
             else:
                 if addr.port < 1024 or addr.port > 65535:
                     continue
@@ -569,12 +591,11 @@ class KnotsNetworkCrawler:
                         continue
                 except Exception:
                     continue
-                port = addr.port
+                dport = addr.port
 
-            key = host + ":" + str(port)
-            if key not in self.seen:
-                self.seen.add(key)
-                await self.to_crawl.put((host, port))
+            if await self._enqueue(host, dport, child_prio):
+                if is_dark:
+                    self._tor_enqueued += 1
                 new_enqueued += 1
                 if new_enqueued > 180:  # per-peer discovery throttle
                     break
