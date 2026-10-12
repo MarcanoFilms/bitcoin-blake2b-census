@@ -314,6 +314,20 @@ class Database:
         ) as cur:
             return [(r["ip"], r["port"]) for r in await cur.fetchall()]
 
+    async def get_fork_nodes(self, limit: int = 20000) -> List[tuple]:
+        """Every node currently flagged is_fork=1, for a focused re-verification
+        pass (--recheck-forks). A membership re-probe is the ONLY way to clear a
+        stale false positive: the discovery crawl only ever flags upward, so a
+        node wrongly marked once stays marked until something re-probes it and
+        gets a definitive not_member."""
+        if not self._conn:
+            await self.connect()
+        async with self._conn.execute(
+            "SELECT ip, port FROM nodes WHERE is_fork=1 ORDER BY last_seen DESC LIMIT ?",
+            (limit,),
+        ) as cur:
+            return [(r["ip"], r["port"]) for r in await cur.fetchall()]
+
     async def set_fork(self, ip: str, port: int, is_fork: bool,
                        verified_height: Optional[int] = None) -> None:
         if not self._conn:

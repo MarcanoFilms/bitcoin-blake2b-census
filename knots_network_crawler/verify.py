@@ -95,13 +95,16 @@ async def probe_node(ip: str, port: int, anchor: bytes, anchor_stop: bytes,
         # round-trips, which is exactly what relieves a congested uplink. Only when
         # the bit is absent do we fall back to the chain probe below.
         member = svc_blake2b
+        definitive_not_member = False
         if not member:
             # Chain probe — read `headers` messages, IGNORING unsolicited block
             # announcements. A peer that mines/relays a block mid-probe pushes its own
             # `headers` (prev_block = recent tip, not our anchor); treating that as the
             # getheaders reply would falsely mark a good node 'not_member' and drop it.
-            # Only a reply whose first prev_block == our anchor confirms membership;
-            # anything else is left as 'unreachable' (never a downgrade).
+            # A reply built on our anchor confirms membership; a multi-header reply
+            # NOT on the anchor means the peer lacks it (fell back to its genesis)
+            # and is downgraded to not_member; a lone unsolicited announcement
+            # header is ignored (mistaking it for a fallback would drop a good node).
             writer.write(build_getheaders([anchor], hash_stop=anchor_stop)); await writer.drain()
             hdr_deadline = asyncio.get_event_loop().time() + budget
             while asyncio.get_event_loop().time() < hdr_deadline:
@@ -110,11 +113,20 @@ async def probe_node(ip: str, port: int, anchor: bytes, anchor_stop: bytes,
                         read_message(reader, timeout=read_timeout), timeout=read_timeout)
                 except (asyncio.TimeoutError, BitcoinProtocolError):
                     break
-                if cmd == CMD_HEADERS and parse_headers_first_prevblock(payload) == anchor:
+                if cmd != CMD_HEADERS:
+                    continue
+                if parse_headers_first_prevblock(payload) == anchor:
                     member = True
                     break
+                count, _fp, _lh = parse_headers_summary(payload, header_size)
+                if count >= 2:
+                    # A real getheaders reply that does NOT build on our anchor:
+                    # the peer is on a chain without our activation block.
+                    definitive_not_member = True
+                    break
+                # count <= 1 and not our anchor -> unsolicited announcement; ignore.
         if not member:
-            return "unreachable", None
+            return ("not_member" if definitive_not_member else "unreachable"), None
 
         # 2. chain-verified height (best-effort; membership already confirmed).
         # Like the membership probe, IGNORE unsolicited block announcements: a peer

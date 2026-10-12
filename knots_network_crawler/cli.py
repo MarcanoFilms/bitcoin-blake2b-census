@@ -243,6 +243,8 @@ def cmd_verify(
     db: Optional[Path] = typer.Option(None, "--db"),
     concurrency: int = typer.Option(12, "--concurrency", "-c", help="Parallel membership probes"),
     limit: int = typer.Option(20000, "--limit", help="Max candidates to verify"),
+    recheck_forks: bool = typer.Option(False, "--recheck-forks",
+        help="Re-probe every is_fork=1 node and downgrade any no longer on our chain (clears stale false positives)."),
 ) -> None:
     """Phase 2: verify BLAKE2b membership + chain-verified height for reachable
     Knots candidates (version + getheaders probes only, no getaddr).
@@ -266,7 +268,8 @@ def cmd_verify(
 
     async def _run():
         await d.connect()
-        candidates = await d.get_fork_candidates(limit)
+        candidates = await (d.get_fork_nodes(limit) if recheck_forks
+                            else d.get_fork_candidates(limit))
         console.print(f"[yellow]Verifying[/yellow] {len(candidates)} candidates at concurrency {concurrency}…")
         counts = await verify_candidates(d, cfg, candidates, concurrency=concurrency,
                                          tip_height=tip_height, tip_hash=tip_hash,
