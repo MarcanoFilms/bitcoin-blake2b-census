@@ -99,18 +99,41 @@ footer a{color:var(--cyan);text-decoration:none}
 .err{color:var(--red);font-family:var(--mono);padding:20px}
 /* ?embed=1 — map only, for embedding in the explorer dashboard (mempool.marcanotrades.com) */
 body.embed{padding:0;min-height:0;background-image:none;background:transparent;overflow:hidden}
-body.embed .map-wrap svg{max-height:calc(100vh - 34px)}
-body.embed #nodemap > .hint{display:none}
 body.embed header,body.embed footer,body.embed .card:not(.card-map){display:none}
 body.embed .grid{margin-top:0!important}
 body.embed .card-map{padding:0;border:0;background:transparent;backdrop-filter:none;border-radius:0}
 body.embed .card-map::before{display:none}
 body.embed .card-map h2{display:none}
 body.embed .map-wrap{border-radius:0;border:0;background:transparent}
-body.embed .embed-foot{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:.72rem;color:var(--text-2);padding:6px 4px 0}
-body.embed .embed-foot b{color:var(--cyan);font-weight:600}
-body.embed .embed-foot a{color:var(--cyan);text-decoration:none}
-.embed-foot{display:none}
+body.embed .map-bar{padding:4px 4px 0;font-size:.68rem;line-height:1.4}
+.map-bar{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:.72rem;color:var(--text-2);padding:8px 2px 0;line-height:1.5}
+.map-bar b{color:var(--cyan);font-weight:600}
+.map-bar a{color:var(--cyan);text-decoration:none}
+.map-bar .nd{display:inline-block;width:7px;height:7px;border-radius:50%;margin:0 4px 0 2px;vertical-align:middle}
+.map-bar .full{display:none}
+body.embed .map-bar .full{display:inline}
+.map-wrap svg{cursor:grab;touch-action:none;user-select:none}
+.map-wrap svg.dragging{cursor:grabbing}
+.map-wrap circle{cursor:pointer;transition:fill-opacity .15s}
+.map-wrap circle:hover{fill-opacity:1;stroke-opacity:.6}
+.map-ctl{position:absolute;top:10px;left:10px;display:flex;flex-direction:column;gap:4px;z-index:2}
+.map-ctl button{width:28px;height:28px;border-radius:7px;border:1px solid var(--border-glow);background:rgba(9,13,26,.85);color:var(--cyan);
+  font-family:var(--mono);font-size:1rem;line-height:1;cursor:pointer;backdrop-filter:blur(6px)}
+.map-ctl button:hover{background:rgba(0,240,255,.12)}
+.map-pop{position:absolute;z-index:3;min-width:230px;max-width:340px;background:rgba(9,13,26,.96);border:1px solid var(--border-glow);
+  border-radius:10px;padding:10px 12px;font-size:.78rem;line-height:1.45;box-shadow:0 8px 30px rgba(0,0,0,.5);backdrop-filter:blur(8px)}
+.map-pop .t{font-weight:700;font-size:.82rem;margin-bottom:6px;padding-right:18px}
+.map-pop .t span{color:var(--text-2);font-weight:400}
+.map-pop .x{position:absolute;top:6px;right:9px;color:var(--text-2);cursor:pointer;font-size:1rem;line-height:1}
+.map-pop .x:hover{color:var(--text)}
+.map-pop ul{list-style:none;max-height:190px;overflow-y:auto;overflow-x:hidden}
+.map-pop li{padding:4px 0;border-top:1px solid var(--border);font-family:var(--mono);font-size:.7rem}
+.map-pop li:first-child{border-top:0}
+.map-pop .ip{color:var(--text);font-weight:600;word-break:break-all}
+.map-pop .ua{color:var(--text-2);word-break:break-all}
+.map-pop .h{color:var(--green)}
+.map-pop .more{color:var(--text-muted);font-size:.68rem;padding-top:4px}
+
 .headline{margin-top:22px}
 .headline .hl{font-family:var(--mono);font-size:1.5rem;font-weight:600;color:var(--green);
   background:rgba(0,255,170,.05);border-left:3px solid var(--green);border-radius:8px;
@@ -273,8 +296,7 @@ function render(d){
   </div>
 
   <div class="grid" style="margin-top:16px">
-    <div class="card card-map"><h2>Node map</h2><div id="nodemap"></div>
-      <div class="embed-foot"><span><b>${fmt(d.fork_reachable)}</b> active nodes · <b>${fmt(d.total_estimate)}</b> estimated · chain-verified</span><a href="https://census.marcanotrades.com/" target="_blank" rel="noopener">Full census ↗</a></div></div>
+    <div class="card card-map"><h2>Node map <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted)">· scroll to zoom, drag to pan, click a dot</span></h2><div id="nodemap"></div></div>
   </div>
 
   <div class="grid" style="margin-top:16px">
@@ -286,6 +308,7 @@ function render(d){
   </div>`;
   document.getElementById('app').innerHTML = html;
   _nodes = d.nodes || [];
+  setMapStats(d);
   drawMap(_nodes);
   renderExplorer();
 }
@@ -357,17 +380,103 @@ function geoLandPath(geo){
   }
   return d;
 }
+var _mapVB = null; // current viewBox, kept across data refreshes
+var _mapStats = {};
+function setMapStats(d){ _mapStats = { active:d.fork_reachable, est:d.total_estimate, tip:d.fork_tip, net:d.by_network||{}, gen:d.generated }; }
 function renderMap(nodes){
   const el = document.getElementById('nodemap');
   if(!el) return;
+  const esc = x => String(x==null?'':x).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   const geo = (nodes||[]).filter(n=>typeof n.lat==='number' && typeof n.lon==='number');
-  const netColor = n => n.net==='tor'?'#ffb000':n.net==='i2p'?'#bd5eff':n.net==='ipv6'?'#00ffaa':'#00f0ff';
-  const land = _worldGeo ? `<path d="${geoLandPath(_worldGeo)}" fill="rgba(255,255,255,.05)" stroke="rgba(0,240,255,.18)" stroke-width="0.6"/>` : '';
-  const dots = geo.map(n=>`<circle cx="${mpx(n.lon).toFixed(1)}" cy="${mpy(n.lat).toFixed(1)}" r="4.5"
-     fill="${netColor(n)}" fill-opacity=".9" stroke="${netColor(n)}" stroke-opacity=".3" stroke-width="5"><title>${(n.city||n.country||'')} · ${n.ip}</title></circle>`).join('');
-  el.innerHTML = `<div class="map-wrap"><svg viewBox="0 0 ${MAP_W} ${MAP_H}" style="width:100%;height:auto;display:block">
-    ${land}${dots}</svg></div>
-    <div class="hint" style="margin-top:8px">${geo.length} geolocated · dot colour = network (cyan IPv4 · green IPv6 · amber Tor · purple I2P)</div>`;
+  const netColor = net => net==='tor'?'#ffb000':net==='i2p'?'#bd5eff':net==='ipv6'?'#00ffaa':'#00f0ff';
+  // group nodes by location (same city/coords) -> one dot per place
+  const places = new Map();
+  for(const n of geo){
+    const k = n.lat.toFixed(2)+','+n.lon.toFixed(2);
+    if(!places.has(k)) places.set(k,{lat:n.lat,lon:n.lon,city:n.city,country:n.country,cc:n.cc,nodes:[]});
+    places.get(k).nodes.push(n);
+  }
+  const land = _worldGeo ? `<path class="land" d="${geoLandPath(_worldGeo)}" fill="rgba(255,255,255,.05)" stroke="rgba(0,240,255,.18)" stroke-width="0.6"/>` : '';
+  let i=0;
+  const dots = [...places.values()].map(p=>{
+    const col = netColor(p.nodes[0].net);
+    const r = 4.5 + Math.min(p.nodes.length-1,8)*0.5;
+    return `<circle data-i="${i++}" cx="${mpx(p.lon).toFixed(1)}" cy="${mpy(p.lat).toFixed(1)}" r="${r}" data-r="${r}"
+     fill="${col}" fill-opacity=".9" stroke="${col}" stroke-opacity=".3" stroke-width="5"/>`;
+  }).join('');
+  const st=_mapStats, net=st.net||{};
+  const cnt = {}; for(const n of (nodes||[])) cnt[n.net]=(cnt[n.net]||0)+1;
+  const N = k => fmt(net[k]!=null?net[k]:(cnt[k]||0));
+  const ago = st.gen ? Math.max(0,Math.round((Date.now()/1000-st.gen)/60)) : null;
+  const bar = `<div class="map-bar">
+    <span><b>${fmt(st.active||geo.length)}</b> active nodes · <b>${fmt(st.est||0)}</b> estimated · <b>${geo.length}</b> geolocated
+      · <span class="nd" style="background:#00f0ff"></span>IPv4 <b>${N('ipv4')}</b> · <span class="nd" style="background:#00ffaa"></span>IPv6 <b>${N('ipv6')}</b>
+      · <span class="nd" style="background:#ffb000"></span>Tor <b>${N('tor')}</b> · <span class="nd" style="background:#bd5eff"></span>I2P <b>${N('i2p')}</b>
+      <span style="color:var(--text-muted)">(Tor/I2P have no location)</span>${st.tip?` · tip <b>#${fmt(st.tip)}</b>`:''}${st.gen?` · updated ${humanDur(Date.now()/1000-st.gen)} ago`:''}</span>
+    <a class="full" href="https://census.marcanotrades.com/" target="_blank" rel="noopener">Full census ↗</a></div>`;
+  el.innerHTML = `<div class="map-wrap">
+    <div class="map-ctl"><button type="button" data-z="in" title="Zoom in">+</button><button type="button" data-z="out" title="Zoom out">−</button><button type="button" data-z="reset" title="Reset view" style="font-size:.7rem">⟲</button></div>
+    <svg viewBox="0 0 ${MAP_W} ${MAP_H}" style="width:100%;height:auto;display:block">${land}${dots}</svg></div>${bar}`;
+
+  // ---- interactivity: zoom (wheel/buttons), pan (drag), popups (click) ----
+  const wrap = el.querySelector('.map-wrap'), svg = wrap.querySelector('svg');
+  const placeList = [...places.values()];
+  let vb = _mapVB && _mapVB.w<=MAP_W ? {..._mapVB} : {x:0,y:0,w:MAP_W,h:MAP_H};
+  const MINW = MAP_W/40;
+  function apply(){
+    vb.w=Math.min(MAP_W,Math.max(MINW,vb.w)); vb.h=vb.w*MAP_H/MAP_W;
+    vb.x=Math.min(MAP_W-vb.w,Math.max(0,vb.x)); vb.y=Math.min(MAP_H-vb.h,Math.max(0,vb.y));
+    svg.setAttribute('viewBox',`${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
+    const z = MAP_W/vb.w, k = 1/Math.sqrt(z);
+    svg.querySelectorAll('circle').forEach(c=>{ c.setAttribute('r',(parseFloat(c.dataset.r)*k).toFixed(2)); c.setAttribute('stroke-width',(5*k).toFixed(2)); });
+    const land=svg.querySelector('.land'); if(land) land.setAttribute('stroke-width',(0.6*k).toFixed(2));
+    _mapVB={...vb};
+  }
+  const toSvg = (cx,cy) => { const b=svg.getBoundingClientRect(); return [vb.x+(cx-b.left)/b.width*vb.w, vb.y+(cy-b.top)/b.height*vb.h]; };
+  function zoomAt(f, cx, cy){
+    closePop();
+    const [px,py] = cx==null ? [vb.x+vb.w/2, vb.y+vb.h/2] : toSvg(cx,cy);
+    const nw = Math.min(MAP_W,Math.max(MINW,vb.w/f)), nh = nw*MAP_H/MAP_W;
+    vb = { x: px-(px-vb.x)*(nw/vb.w), y: py-(py-vb.y)*(nh/vb.h), w:nw, h:nh }; apply();
+  }
+  svg.addEventListener('wheel', e=>{ e.preventDefault(); zoomAt(e.deltaY<0?1.3:1/1.3, e.clientX, e.clientY); }, {passive:false});
+  wrap.querySelectorAll('.map-ctl button').forEach(b=>b.addEventListener('click',()=>{
+    if(b.dataset.z==='in') zoomAt(1.5); else if(b.dataset.z==='out') zoomAt(1/1.5); else { closePop(); vb={x:0,y:0,w:MAP_W,h:MAP_H}; apply(); }
+  }));
+  let drag=null;
+  svg.addEventListener('pointerdown', e=>{ if(e.button!==0) return; drag={x:e.clientX,y:e.clientY,vx:vb.x,vy:vb.y,moved:false}; svg.setPointerCapture(e.pointerId); });
+  svg.addEventListener('pointermove', e=>{
+    if(!drag) return; const b=svg.getBoundingClientRect();
+    const dx=(e.clientX-drag.x)/b.width*vb.w, dy=(e.clientY-drag.y)/b.height*vb.h;
+    if(Math.abs(e.clientX-drag.x)+Math.abs(e.clientY-drag.y)>3){ drag.moved=true; svg.classList.add('dragging'); closePop(); }
+    vb.x=drag.vx-dx; vb.y=drag.vy-dy; apply();
+  });
+  const endDrag = e => { if(!drag) return; const moved=drag.moved; drag=null; svg.classList.remove('dragging');
+    if(!moved){ const c = e.target.closest && e.target.closest('circle'); if(c) openPop(c); else closePop(); } };
+  svg.addEventListener('pointerup', endDrag); svg.addEventListener('pointercancel', ()=>{drag=null; svg.classList.remove('dragging');});
+  function closePop(){ const p=wrap.querySelector('.map-pop'); if(p) p.remove(); }
+  function openPop(c){
+    closePop();
+    const p = placeList[+c.dataset.i]; if(!p) return;
+    const ns = p.nodes.slice().sort((a,b)=>(b.height||0)-(a.height||0));
+    const li = ns.slice(0,8).map(n=>`<li><span class="nd" style="background:${netColor(n.net)};display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px"></span><span class="ip">${esc(n.ip)}${n.port?':'+n.port:''}</span>
+      <div class="ua">${esc(n.subversion||'')}${n.pruned?' · pruned':''}${n.v2===false?' · v1':''}</div>
+      <div>${n.height!=null?`<span class="h">#${fmt(n.height)}</span>`:''}${n.asn_org?` · <span style="color:var(--text-muted)">${esc(n.asn_org)}</span>`:''}</div></li>`).join('');
+    const more = ns.length>8 ? `<div class="more">+${ns.length-8} more at this location</div>` : '';
+    const div=document.createElement('div'); div.className='map-pop';
+    div.innerHTML=`<span class="x" title="Close">×</span><div class="t">${CC(p.cc)} ${esc(p.city||'')}${p.city&&p.country?', ':''}${esc(p.country||'')} <span>— ${ns.length} node${ns.length>1?'s':''}</span></div><ul>${li}</ul>${more}`;
+    div.querySelector('.x').addEventListener('click', closePop);
+    wrap.appendChild(div);
+    // position next to the dot, clamped inside the map
+    const wb=wrap.getBoundingClientRect(), cb=c.getBoundingClientRect();
+    let x=cb.left-wb.left+cb.width+10, y=cb.top-wb.top-12;
+    if(x+div.offsetWidth>wb.width-6) x=cb.left-wb.left-div.offsetWidth-10;
+    if(x<6) x=6; if(y+div.offsetHeight>wb.height-6) y=wb.height-div.offsetHeight-6; if(y<6) y=6;
+    div.style.left=x+'px'; div.style.top=y+'px';
+  }
+  function fitEmbed(){ if(!document.body.classList.contains('embed')) return; const bar=el.querySelector('.map-bar'); svg.style.maxHeight=Math.max(120, innerHeight-(bar?bar.offsetHeight:0)-2)+'px'; }
+  fitEmbed(); window.addEventListener('resize', fitEmbed);
+  apply();
 }
 function drawMap(nodes){
   if(_worldGeo){ renderMap(nodes); return; }
