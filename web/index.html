@@ -97,6 +97,18 @@ th .arr{color:var(--cyan)}
 footer{margin-top:34px;text-align:center;color:var(--text-muted);font-size:.8rem;line-height:1.7}
 footer a{color:var(--cyan);text-decoration:none}
 .err{color:var(--red);font-family:var(--mono);padding:20px}
+/* ?embed=1 — map only, for embedding in the explorer dashboard (mempool.marcanotrades.com) */
+body.embed{padding:0;min-height:0;background-image:none;background:transparent}
+body.embed header,body.embed footer,body.embed .card:not(.card-map){display:none}
+body.embed .grid{margin-top:0!important}
+body.embed .card-map{padding:0;border:0;background:transparent;backdrop-filter:none;border-radius:0}
+body.embed .card-map::before{display:none}
+body.embed .card-map h2{display:none}
+body.embed .map-wrap{border-radius:0;border:0;background:transparent}
+body.embed .embed-foot{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:.72rem;color:var(--text-2);padding:6px 4px 0}
+body.embed .embed-foot b{color:var(--cyan);font-weight:600}
+body.embed .embed-foot a{color:var(--cyan);text-decoration:none}
+.embed-foot{display:none}
 .headline{margin-top:22px}
 .headline .hl{font-family:var(--mono);font-size:1.5rem;font-weight:600;color:var(--green);
   background:rgba(0,255,170,.05);border-left:3px solid var(--green);border-radius:8px;
@@ -259,7 +271,8 @@ function render(d){
   </div>
 
   <div class="grid" style="margin-top:16px">
-    <div class="card"><h2>Node map</h2><div id="nodemap"></div></div>
+    <div class="card card-map"><h2>Node map</h2><div id="nodemap"></div>
+      <div class="embed-foot"><span><b>${fmt(d.fork_reachable)}</b> active nodes · <b>${fmt(d.total_estimate)}</b> estimated · chain-verified</span><a href="https://census.marcanotrades.com/" target="_blank" rel="noopener">Full census ↗</a></div></div>
   </div>
 
   <div class="grid" style="margin-top:16px">
@@ -403,6 +416,7 @@ function renderExplorer(){
       <button onclick="expPage(1)" ${expState.page>=pages-1?'disabled':''}>Next ›</button></span></div>`;
 }
 
+if(new URLSearchParams(location.search).get('embed')==='1') document.body.classList.add('embed');
 function load(){
   fetch(location.protocol==='file:' ? 'data.json' : 'data.json?t='+Date.now())
     .then(r=>{if(!r.ok)throw new Error('data.json '+r.status);return r.json()})
