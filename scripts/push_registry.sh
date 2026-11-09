@@ -16,4 +16,4 @@ DATE=$(date +%Y-%m-%d)
 COUNT=$(tail -n +2 web/registry.csv 2>/dev/null | wc -l | tr -d ' ')
 git -c user.name="MarcanoFilms" -c user.email="marcanofilms@gmail.com" \
   commit -q -m "registry: node record $DATE (${COUNT} unique nodes)" || exit 1
-git push origin main 2>&1 | tail -1
+git push origin HEAD 2>&1 | tail -1
